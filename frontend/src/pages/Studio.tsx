@@ -10,6 +10,7 @@ import {
   toPx,
   fetchEstimate,
   generate,
+  uploadRef,
   krw,
   type Estimate,
   type GenerateResult,
@@ -68,6 +69,7 @@ export default function Studio() {
   const [quality, setQuality] = useState("medium");
   const [description, setDescription] = useState("");
   const [textContent, setTextContent] = useState("");
+  const [refFile, setRefFile] = useState<File | null>(null);
   const [estimate, setEstimate] = useState<Estimate | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -114,6 +116,12 @@ export default function Studio() {
     setBusy(true);
     setError("");
     try {
+      // 첨부 사진이 있으면 먼저 업로드(참고 재생성 버튼으로 온 경우는 제외)
+      let refUploadId: string | undefined;
+      if (!refGenerationId && refFile) {
+        refUploadId = await uploadRef(refFile);
+      }
+      const hasRef = !!refGenerationId || !!refUploadId;
       const fullPrompt = `${biz ? `[업종: ${biz.label}] ` : ""}${description}. ${NEWSPAPER_HINT}`;
       const r = await generate({
         prompt: fullPrompt,
@@ -123,7 +131,8 @@ export default function Studio() {
         mode: "ai_text",
         text_content: textContent.trim() || undefined,
         ref_generation_id: refGenerationId,
-        similarity: refGenerationId ? 2 : undefined,
+        ref_upload_id: refUploadId,
+        similarity: hasRef ? 2 : undefined,
       });
       setResult(r);
     } catch (e: unknown) {
@@ -146,6 +155,7 @@ export default function Studio() {
     setSize(null);
     setDescription("");
     setTextContent("");
+    setRefFile(null);
   }
 
   // 마법사 도중 이탈 시 입력 손실 확인
@@ -412,6 +422,30 @@ export default function Studio() {
               placeholder="예) 봄맞이 30% 할인"
               className="h-14 w-full rounded-2xl border-2 border-neutral-200 bg-neutral-50 px-4 text-lg outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15 dark:border-neutral-800 dark:bg-neutral-900"
             />
+
+            <p className="mb-2 mt-6 text-lg font-semibold">
+              참고할 사진 <span className="font-normal text-neutral-400">(선택 · 비슷한 느낌으로 만들어요)</span>
+            </p>
+            {refFile ? (
+              <div className="flex items-center gap-3 rounded-2xl border-2 border-emerald-200 bg-emerald-50/50 p-3 dark:border-emerald-900/50 dark:bg-emerald-950/20">
+                <img src={URL.createObjectURL(refFile)} alt="참고 사진" className="h-16 w-16 rounded-lg object-cover" />
+                <span className="flex-1 truncate text-base">{refFile.name}</span>
+                <button type="button" onClick={() => setRefFile(null)} className="flex h-10 items-center gap-1 rounded-lg px-3 text-base text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800">
+                  <Icon icon="ph:x-bold" /> 빼기
+                </button>
+              </div>
+            ) : (
+              <label className="flex h-14 cursor-pointer items-center gap-2 rounded-2xl border-2 border-dashed border-neutral-300 px-4 text-lg text-neutral-500 hover:border-emerald-400 hover:text-emerald-700 dark:border-neutral-700">
+                <Icon icon="ph:image-square-duotone" className="text-[24px]" />
+                사진 고르기
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => setRefFile(e.target.files?.[0] ?? null)}
+                />
+              </label>
+            )}
           </Section>
         )}
 

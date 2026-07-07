@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from db import close_pool, open_pool
-from routers import admin, auth, folders, generate, templates, usage
+from routers import admin, auth, folders, generate, refs, templates, usage
 
 FRONTEND_DIST = pathlib.Path(__file__).resolve().parents[1] / "frontend" / "dist"
 
@@ -31,7 +31,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for r in (auth.router, generate.router, usage.router, folders.router, templates.router, admin.router):
+for r in (auth.router, generate.router, refs.router, usage.router, folders.router, templates.router, admin.router):
     app.include_router(r)
 
 

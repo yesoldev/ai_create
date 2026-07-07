@@ -66,7 +66,7 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
     with get_conn() as conn:
         remaining = ledger.remaining_krw(conn, user)
     est = cost.estimate_cost_krw(gen_w, gen_h, body.quality)
-    if body.ref_generation_id:
+    if body.ref_generation_id or body.ref_upload_id:
         est *= 2  # 참고 이미지 입력 토큰(high fidelity 과금) 대략 반영
     if remaining is not None and est > remaining:
         raise HTTPException(
@@ -79,9 +79,10 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
     if body.mode == "ai_text" and body.text_content:
         prompt = f'{prompt}\n\n다음 한글 문구를 정확히 큼직하게 넣어줘: "{body.text_content}"'
 
-    # 참고 이미지(이전 생성물) 준비
+    # 참고 이미지 준비 (이전 생성물 또는 첨부 업로드)
     ref_path = None
     ref_bytes = None
+    ref_bucket = None
     if body.ref_generation_id:
         with get_conn() as conn:
             rg = conn.execute(
@@ -89,14 +90,18 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
                 (body.ref_generation_id, user["id"]),
             ).fetchone()
         if rg:
-            ref_path = rg["result_path"]
-            try:
-                ref_url = await storage.signed_url("results", ref_path)
-                async with httpx.AsyncClient(timeout=60) as hc:
-                    ref_bytes = (await hc.get(ref_url)).content
-            except Exception:  # noqa: BLE001
-                ref_bytes = None
-            prompt = f"{_SIMILARITY_PREFIX.get(body.similarity or 2)} {prompt}"
+            ref_path, ref_bucket = rg["result_path"], "results"
+    elif body.ref_upload_id:
+        ref_path, ref_bucket = body.ref_upload_id, "refs"
+
+    if ref_path and ref_bucket:
+        try:
+            ref_url = await storage.signed_url(ref_bucket, ref_path)
+            async with httpx.AsyncClient(timeout=60) as hc:
+                ref_bytes = (await hc.get(ref_url)).content
+        except Exception:  # noqa: BLE001
+            ref_bytes = None
+        prompt = f"{_SIMILARITY_PREFIX.get(body.similarity or 2)} {prompt}"
 
     # 3) 생성 (참고 있으면 변형 생성, 없으면 신규. 최소 픽셀 처리 후 요청 크기로 축소)
     try:

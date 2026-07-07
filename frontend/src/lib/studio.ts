@@ -90,7 +90,16 @@ export interface GeneratePayload {
   mode: "ai_text" | "layer";
   text_content?: string;
   ref_generation_id?: string;
+  ref_upload_id?: string;
   similarity?: number; // 1~4
+}
+
+// 참고용 사진 업로드 → ref_upload_id 반환
+export async function uploadRef(file: File): Promise<string> {
+  const fd = new FormData();
+  fd.append("file", file);
+  const { data } = await api.post<{ ref_upload_id: string }>("/api/refs/upload", fd);
+  return data.ref_upload_id;
 }
 
 export async function generate(p: GeneratePayload): Promise<GenerateResult> {
