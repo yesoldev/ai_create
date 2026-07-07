@@ -3,7 +3,8 @@ import { AuthProvider, useAuth } from "./lib/auth";
 import Login from "./pages/Login";
 import Studio from "./pages/Studio";
 import Home from "./pages/Home";
-import { Editor, Library, Admin } from "./pages/placeholders";
+import Admin from "./pages/Admin";
+import { Editor, Library } from "./pages/placeholders";
 import type { ReactNode } from "react";
 
 function Loading() {
