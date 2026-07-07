@@ -89,6 +89,8 @@ export interface GeneratePayload {
   quality: string;
   mode: "ai_text" | "layer";
   text_content?: string;
+  ref_generation_id?: string;
+  similarity?: number; // 1~4
 }
 
 export async function generate(p: GeneratePayload): Promise<GenerateResult> {

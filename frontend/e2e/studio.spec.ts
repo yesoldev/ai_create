@@ -65,6 +65,15 @@ test("스튜디오 마법사로 배너를 만든다 (생성 모킹)", async ({ p
   await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("button", { name: /PNG로 내려받기/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /JPG로 내려받기/ })).toBeVisible();
+
+  // 비슷하게 다시 만들기(참고 재생성) → 참고 id 전송 확인 후 다시 결과
+  const regen = page.waitForRequest((r) => {
+    if (!r.url().endsWith("/api/generate") || r.method() !== "POST") return false;
+    return r.postDataJSON()?.ref_generation_id === "test-id";
+  });
+  await page.getByRole("button", { name: /비슷하게 다시 만들기/ }).click();
+  await regen;
+  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
 });
 
 test("직접 크기(mm) 입력이 px로 환산되어 생성된다", async ({ page }) => {

@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import uuid
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -18,6 +19,14 @@ from services import cost, ledger, openai_client, sizing, storage
 router = APIRouter(prefix="/api", tags=["generate"])
 
 _MM_PER_INCH = 25.4
+
+# 유사도(1~4)에 따른 프롬프트 접두 — 모델에 강도 파라미터가 없어 문구로 근사(계획 §3.1)
+_SIMILARITY_PREFIX = {
+    1: "아래 참고 이미지의 느낌만 살짝 참고해 새롭게 만들어줘.",
+    2: "아래 참고 이미지와 비슷한 분위기로 다시 만들어줘.",
+    3: "아래 참고 이미지의 구도와 색감을 비슷하게 유지하며 다시 만들어줘.",
+    4: "아래 참고 이미지를 거의 그대로 유지하되 아주 조금만 다르게 만들어줘.",
+}
 
 
 def to_px(value: float, unit: str, dpi: int) -> int:
@@ -57,6 +66,8 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
     with get_conn() as conn:
         remaining = ledger.remaining_krw(conn, user)
     est = cost.estimate_cost_krw(gen_w, gen_h, body.quality)
+    if body.ref_generation_id:
+        est *= 2  # 참고 이미지 입력 토큰(high fidelity 과금) 대략 반영
     if remaining is not None and est > remaining:
         raise HTTPException(
             status_code=402,
@@ -68,9 +79,31 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
     if body.mode == "ai_text" and body.text_content:
         prompt = f'{prompt}\n\n다음 한글 문구를 정확히 큼직하게 넣어줘: "{body.text_content}"'
 
-    # 3) 생성 (최소 픽셀 제약 처리 후 요청 크기로 축소)
+    # 참고 이미지(이전 생성물) 준비
+    ref_path = None
+    ref_bytes = None
+    if body.ref_generation_id:
+        with get_conn() as conn:
+            rg = conn.execute(
+                "select result_path from public.generations where id=%s and user_id=%s",
+                (body.ref_generation_id, user["id"]),
+            ).fetchone()
+        if rg:
+            ref_path = rg["result_path"]
+            try:
+                ref_url = await storage.signed_url("results", ref_path)
+                async with httpx.AsyncClient(timeout=60) as hc:
+                    ref_bytes = (await hc.get(ref_url)).content
+            except Exception:  # noqa: BLE001
+                ref_bytes = None
+            prompt = f"{_SIMILARITY_PREFIX.get(body.similarity or 2)} {prompt}"
+
+    # 3) 생성 (참고 있으면 변형 생성, 없으면 신규. 최소 픽셀 처리 후 요청 크기로 축소)
     try:
-        png, usage, (w, h) = await openai_client.generate_image(prompt, w, h, body.quality)
+        if ref_bytes:
+            png, usage, (w, h) = await openai_client.generate_from_reference(ref_bytes, prompt, w, h, body.quality)
+        else:
+            png, usage, (w, h) = await openai_client.generate_image(prompt, w, h, body.quality)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"이미지 생성 실패: {e}")
 
@@ -88,10 +121,10 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
     with get_conn() as conn:
         conn.execute(
             "insert into public.generations "
-            "(id, user_id, template_id, prompt, model, quality, size, result_path, cost_krw) "
-            "values (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "(id, user_id, template_id, prompt, model, quality, size, ref_image_path, result_path, cost_krw) "
+            "values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (gid, user["id"], None, prompt, openai_client.IMAGE_MODEL,
-             body.quality, f"{w}x{h}", result_path, cost_krw),
+             body.quality, f"{w}x{h}", ref_path, result_path, cost_krw),
         )
         ledger.add_usage(conn, user["id"], cost_krw)
         remaining_after = ledger.remaining_krw(conn, user)

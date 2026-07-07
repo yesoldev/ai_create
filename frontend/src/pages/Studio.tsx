@@ -109,7 +109,7 @@ export default function Studio() {
     setStep(3);
   }
 
-  async function onGenerate() {
+  async function onGenerate(refGenerationId?: string) {
     if (!effW || !effH) return;
     setBusy(true);
     setError("");
@@ -122,6 +122,8 @@ export default function Studio() {
         quality,
         mode: "ai_text",
         text_content: textContent.trim() || undefined,
+        ref_generation_id: refGenerationId,
+        similarity: refGenerationId ? 2 : undefined,
       });
       setResult(r);
     } catch (e: unknown) {
@@ -178,7 +180,7 @@ export default function Studio() {
             <img src={result.image_url} alt="만든 홍보물" className="mx-auto max-h-[62vh] w-auto" />
           </div>
 
-          <div className="mt-6">
+          <div className="mt-6 grid gap-3 sm:grid-cols-2">
             <BigButton
               icon="ph:pencil-simple-bold"
               onClick={() =>
@@ -188,6 +190,9 @@ export default function Studio() {
               }
             >
               글자 넣고 꾸미기
+            </BigButton>
+            <BigButton icon="ph:arrows-clockwise-bold" tone="soft" onClick={() => onGenerate(result.generation_id)}>
+              비슷하게 다시 만들기
             </BigButton>
           </div>
 
@@ -448,7 +453,7 @@ export default function Studio() {
               다음
             </BigButton>
           ) : (
-            <BigButton icon="ph:magic-wand-bold" onClick={onGenerate}>
+            <BigButton icon="ph:magic-wand-bold" onClick={() => onGenerate()}>
               만들기
             </BigButton>
           )}

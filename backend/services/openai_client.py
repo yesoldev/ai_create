@@ -80,6 +80,40 @@ async def generate_image(
     return png, usage, (fin_w, fin_h)
 
 
+async def generate_from_reference(
+    ref_png: bytes,
+    prompt: str,
+    width: int,
+    height: int,
+    quality: str = "medium",
+    model: str | None = None,
+) -> tuple[bytes, dict, tuple[int, int]]:
+    """참고 이미지 기반 생성(변형). 참고 이미지를 입력으로 edit 호출 → 요청 크기로 축소.
+
+    참고 이미지는 최소 픽셀 제약을 맞추기 위해 생성 크기로 리샘플해 전달한다.
+    """
+    gen_w, gen_h, fin_w, fin_h = plan_size(width, height)
+    # 참고 이미지를 생성 크기에 맞춰 리샘플(최소 픽셀 예산 충족)
+    ref_img = Image.open(io.BytesIO(ref_png)).convert("RGBA").resize((gen_w, gen_h), Image.LANCZOS)
+    buf = io.BytesIO()
+    ref_img.save(buf, format="PNG")
+    buf.name = "reference.png"
+    buf.seek(0)
+
+    resp = await client.images.edit(
+        model=model or IMAGE_MODEL,
+        image=buf,
+        prompt=prompt,
+        size=f"{gen_w}x{gen_h}",
+        n=1,
+    )
+    usage = _usage_dict(resp)
+    png = base64.b64decode(resp.data[0].b64_json)
+    if (gen_w, gen_h) != (fin_w, fin_h):
+        png = _resize_png(png, fin_w, fin_h)
+    return png, usage, (fin_w, fin_h)
+
+
 async def inpaint_image(
     image_png: bytes,
     mask_png: bytes,
@@ -97,7 +131,6 @@ async def inpaint_image(
         image=img_f,
         mask=mask_f,
         prompt=prompt,
-        quality=quality,
         n=1,
     )
     b64 = resp.data[0].b64_json
