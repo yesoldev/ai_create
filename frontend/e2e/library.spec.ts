@@ -27,6 +27,9 @@ test("보관함: 편집기에서 저장하고 다시 열기", async ({ page }) =
       });
     }
   });
+  await page.route("**/api/folders/tree", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [{ id: "f1", parent_id: null, name: "OO식당", sort_order: 0 }] }) }),
+  );
   await page.route("**/api/templates/tpl1", (route) =>
     route.fulfill({
       status: 200,
@@ -57,8 +60,9 @@ test("보관함: 편집기에서 저장하고 다시 열기", async ({ page }) =
   await saveReq;
   await expect(page.getByText("보관함에 저장했어요.")).toBeVisible();
 
-  // 보관함으로 이동 → 항목 확인 → 다시 열기
+  // 보관함으로 이동 → 폴더 트리 + 항목 확인 → 다시 열기
   await page.goto("/library");
+  await expect(page.getByRole("button", { name: /OO식당/ })).toBeVisible();
   await expect(page.getByText("봄맞이 배너")).toBeVisible();
   await page.getByText("봄맞이 배너").click();
   await expect(page).toHaveURL(/\/editor$/);

@@ -19,8 +19,9 @@ export interface TemplateDetail {
   thumb_url?: string;
 }
 
-export async function listTemplates(): Promise<TemplateListItem[]> {
-  return (await api.get<{ items: TemplateListItem[] }>("/api/templates")).data.items;
+export async function listTemplates(folderId?: string | null): Promise<TemplateListItem[]> {
+  const params = folderId ? { folder_id: folderId } : {};
+  return (await api.get<{ items: TemplateListItem[] }>("/api/templates", { params })).data.items;
 }
 
 export async function getTemplate(id: string): Promise<TemplateDetail> {
@@ -33,6 +34,7 @@ export async function saveTemplate(body: {
   size_w: number;
   size_h: number;
   generation_id?: string;
+  folder_id?: string | null;
 }): Promise<{ id: string }> {
   return (await api.post("/api/templates", body)).data;
 }

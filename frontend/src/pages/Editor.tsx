@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "@iconify/react";
 import { Canvas, IText, Rect, Circle, type FabricObject } from "fabric";
 import { saveTemplate } from "../lib/library";
+import { listFolders, withDepth, type Folder } from "../lib/folders";
 
 interface EditorState {
   imageUrl?: string;
@@ -42,6 +43,12 @@ export default function Editor() {
   const [tplName, setTplName] = useState(st.templateName || "");
   const [saveMsg, setSaveMsg] = useState("");
   const [saving, setSaving] = useState(false);
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [folderId, setFolderId] = useState<string>("");
+
+  useEffect(() => {
+    listFolders().then(setFolders).catch(() => {});
+  }, []);
 
   const snapshot = useCallback(() => {
     if (!fabricRef.current || restoring.current) return;
@@ -269,6 +276,7 @@ export default function Editor() {
         size_w: natSize.current.w,
         size_h: natSize.current.h,
         generation_id: st.generationId,
+        folder_id: folderId || null,
       });
       setShowSave(false);
       setSaveMsg("보관함에 저장했어요.");
@@ -327,6 +335,20 @@ export default function Editor() {
               placeholder="예) 봄맞이 할인 배너"
               className="mt-4 h-12 w-full rounded-xl border-2 border-neutral-200 px-4 text-lg outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-800"
             />
+            <label className="mt-3 block text-base font-semibold">폴더</label>
+            <select
+              value={folderId}
+              onChange={(e) => setFolderId(e.target.value)}
+              className="mt-1 h-12 w-full rounded-xl border-2 border-neutral-200 px-3 text-lg outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-800"
+            >
+              <option value="">폴더 없음</option>
+              {withDepth(folders).map((f) => (
+                <option key={f.id} value={f.id}>
+                  {" ".repeat(f.depth * 2)}
+                  {f.name}
+                </option>
+              ))}
+            </select>
             <div className="mt-5 flex gap-2">
               <button type="submit" disabled={saving || !tplName.trim()} className={`${btn} flex-1 justify-center bg-emerald-600 text-white hover:bg-emerald-500`}>
                 <Icon icon="ph:check-bold" /> {saving ? "저장 중..." : "저장"}
