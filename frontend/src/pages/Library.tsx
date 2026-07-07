@@ -3,14 +3,17 @@ import { useNavigate } from "react-router-dom";
 import { Icon } from "@iconify/react";
 import { listTemplates, getTemplate, deleteTemplate, type TemplateListItem } from "../lib/library";
 import { listFolders, createFolder, deleteFolder, withDepth, type Folder } from "../lib/folders";
+import { InputDialog, ConfirmDialog } from "../components/dialogs";
 
 export default function Library() {
   const nav = useNavigate();
   const [folders, setFolders] = useState<Folder[]>([]);
-  const [sel, setSel] = useState<string | null>(null); // null = 전체
+  const [sel, setSel] = useState<string | null>(null);
   const [items, setItems] = useState<TemplateListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [opening, setOpening] = useState<string | null>(null);
+  const [newFolderOpen, setNewFolderOpen] = useState(false);
+  const [confirm, setConfirm] = useState<{ title: string; desc?: string; onYes: () => void } | null>(null);
 
   async function loadFolders() {
     try {
@@ -37,22 +40,27 @@ export default function Library() {
     loadTemplates(id);
   }
 
-  async function addFolder() {
-    const name = window.prompt("새 폴더 이름 (예: OO식당)");
-    if (!name?.trim()) return;
-    await createFolder(name.trim(), sel);
+  async function addFolder(name: string) {
+    await createFolder(name, sel);
+    setNewFolderOpen(false);
     loadFolders();
   }
 
-  async function removeFolder(f: Folder) {
-    if (!window.confirm(`폴더 "${f.name}"을(를) 지울까요? 안의 항목도 함께 지워집니다.`)) return;
-    try {
-      await deleteFolder(f.id, true);
-    } catch {
-      /* ignore */
-    }
-    if (sel === f.id) pick(null);
-    loadFolders();
+  function askRemoveFolder(f: Folder) {
+    setConfirm({
+      title: `폴더 "${f.name}"을(를) 지울까요?`,
+      desc: "폴더 안의 항목도 함께 지워집니다.",
+      onYes: async () => {
+        setConfirm(null);
+        try {
+          await deleteFolder(f.id, true);
+        } catch {
+          /* ignore */
+        }
+        if (sel === f.id) pick(null);
+        loadFolders();
+      },
+    });
   }
 
   async function open(id: string) {
@@ -66,6 +74,7 @@ export default function Library() {
           h: t.size_h || 1024,
           canvasJson: t.canvas_json || undefined,
           templateName: t.name,
+          templateId: t.id,
         },
       });
     } finally {
@@ -73,10 +82,15 @@ export default function Library() {
     }
   }
 
-  async function remove(id: string, name: string) {
-    if (!window.confirm(`"${name}"을(를) 보관함에서 지울까요?`)) return;
-    await deleteTemplate(id);
-    loadTemplates(sel);
+  function askRemoveTemplate(id: string, name: string) {
+    setConfirm({
+      title: `"${name}"을(를) 지울까요?`,
+      onYes: async () => {
+        setConfirm(null);
+        await deleteTemplate(id);
+        loadTemplates(sel);
+      },
+    });
   }
 
   const tree = withDepth(folders);
@@ -90,17 +104,21 @@ export default function Library() {
           </span>
           보관함
         </div>
-        <button onClick={() => nav("/")} className="flex h-11 items-center gap-1 rounded-xl px-3 text-base text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800">
-          <Icon icon="ph:house-duotone" /> 홈으로
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => nav("/studio")} className="flex h-11 items-center gap-1 rounded-xl bg-emerald-600 px-4 text-base font-bold text-white hover:bg-emerald-500">
+            <Icon icon="ph:plus-bold" /> 새 프로젝트
+          </button>
+          <button onClick={() => nav("/")} className="flex h-11 items-center gap-1 rounded-xl px-3 text-base text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800">
+            <Icon icon="ph:house-duotone" /> 홈으로
+          </button>
+        </div>
       </header>
 
       <div className="mx-auto flex max-w-6xl gap-6 px-5 py-8">
-        {/* 좌: 폴더 트리 */}
         <aside className="w-56 shrink-0">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-base font-semibold text-neutral-500">폴더</span>
-            <button onClick={addFolder} className="flex h-9 items-center gap-1 rounded-lg px-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/30">
+            <button onClick={() => setNewFolderOpen(true)} className="flex h-9 items-center gap-1 rounded-lg px-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/30">
               <Icon icon="ph:folder-plus-bold" /> 새 폴더
             </button>
           </div>
@@ -119,14 +137,13 @@ export default function Library() {
                 <Icon icon="ph:folder-duotone" className="shrink-0" />
                 <span className="truncate">{f.name}</span>
               </button>
-              <button onClick={() => removeFolder(f)} className="ml-1 hidden h-8 w-8 place-items-center rounded-lg text-neutral-400 hover:bg-red-50 hover:text-red-600 group-hover:grid dark:hover:bg-red-950/30" aria-label="폴더 지우기">
+              <button onClick={() => askRemoveFolder(f)} className="ml-1 hidden h-8 w-8 place-items-center rounded-lg text-neutral-400 hover:bg-red-50 hover:text-red-600 group-hover:grid dark:hover:bg-red-950/30" aria-label="폴더 지우기">
                 <Icon icon="ph:trash" />
               </button>
             </div>
           ))}
         </aside>
 
-        {/* 우: 템플릿 그리드 */}
         <main className="min-w-0 flex-1">
           <h1 className="text-2xl font-bold">저장한 홍보물</h1>
           <p className="mt-1 text-base text-neutral-500 dark:text-neutral-400">눌러서 다시 열고, 글자만 바꿔 재사용하세요.</p>
@@ -157,7 +174,7 @@ export default function Library() {
                     <p className="truncate px-3 pt-2 text-base font-semibold">{t.name}</p>
                     <p className="px-3 pb-1 text-sm text-neutral-400">{t.size_w}×{t.size_h}</p>
                   </button>
-                  <button onClick={() => remove(t.id, t.name)} className="flex w-full items-center justify-center gap-1 border-t border-neutral-100 py-2 text-sm text-neutral-400 hover:bg-red-50 hover:text-red-600 dark:border-neutral-800 dark:hover:bg-red-950/30">
+                  <button onClick={() => askRemoveTemplate(t.id, t.name)} className="flex w-full items-center justify-center gap-1 border-t border-neutral-100 py-2 text-sm text-neutral-400 hover:bg-red-50 hover:text-red-600 dark:border-neutral-800 dark:hover:bg-red-950/30">
                     <Icon icon="ph:trash-bold" /> 지우기
                   </button>
                 </div>
@@ -166,6 +183,28 @@ export default function Library() {
           )}
         </main>
       </div>
+
+      <InputDialog
+        open={newFolderOpen}
+        icon="ph:folder-plus-duotone"
+        title="새 폴더 만들기"
+        desc="업체 이름 등으로 폴더를 만들어 정리하세요."
+        placeholder="예) 행복식당"
+        confirmLabel="만들기"
+        onConfirm={addFolder}
+        onClose={() => setNewFolderOpen(false)}
+      />
+      <ConfirmDialog
+        open={!!confirm}
+        icon="ph:warning-duotone"
+        title={confirm?.title || ""}
+        desc={confirm?.desc}
+        onClose={() => setConfirm(null)}
+        actions={[
+          { label: "지우기", tone: "danger", icon: "ph:trash-bold", onClick: () => confirm?.onYes() },
+          { label: "취소", tone: "ghost", onClick: () => setConfirm(null) },
+        ]}
+      />
     </div>
   );
 }

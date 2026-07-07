@@ -56,6 +56,15 @@ async function downloadImage(url: string, format: "png" | "jpg") {
 
 const STEP_LABELS = ["종류", "업종", "크기·품질", "문구", "만들기"];
 
+// 생성 중 표시할 AI 작업 상태(순환)
+const LOADING_STEPS = [
+  { icon: "ph:brain-duotone", text: "무엇을 그릴지 생각하고 있어요" },
+  { icon: "ph:paint-roller-duotone", text: "바탕을 칠하는 중이에요" },
+  { icon: "ph:palette-duotone", text: "색을 입히는 중이에요" },
+  { icon: "ph:text-aa-duotone", text: "글자와 모양을 다듬는 중이에요" },
+  { icon: "ph:sparkle-duotone", text: "마무리하는 중이에요" },
+];
+
 export default function Studio() {
   const nav = useNavigate();
   const [step, setStep] = useState(1);
@@ -87,8 +96,19 @@ export default function Studio() {
   }
   const [estimate, setEstimate] = useState<Estimate | null>(null);
   const [busy, setBusy] = useState(false);
+  const [busyStep, setBusyStep] = useState(0);
   const [error, setError] = useState("");
   const [result, setResult] = useState<GenerateResult | null>(null);
+
+  // 생성 중일 때 상태 메시지 순환
+  useEffect(() => {
+    if (!busy) return;
+    setBusyStep(0);
+    const t = setInterval(() => {
+      setBusyStep((s) => Math.min(s + 1, LOADING_STEPS.length - 1));
+    }, 3500);
+    return () => clearInterval(t);
+  }, [busy]);
 
   // 실제 생성 크기(px): 직접 입력이면 환산+상한, 아니면 프리셋
   const effW = custom ? Math.min(toPx(cw, unit), MAX_PX) : size?.w ?? 0;
@@ -216,7 +236,13 @@ export default function Studio() {
               icon="ph:pencil-simple-bold"
               onClick={() =>
                 nav("/editor", {
-                  state: { imageUrl: result.image_url, w: effW, h: effH, generationId: result.generation_id },
+                  state: {
+                    imageUrl: result.image_url,
+                    w: effW,
+                    h: effH,
+                    generationId: result.generation_id,
+                    templateId: result.project_id,
+                  },
                 })
               }
             >
@@ -255,14 +281,25 @@ export default function Studio() {
 
   // ───────── 생성 중 ─────────
   if (busy) {
+    const msg = LOADING_STEPS[Math.min(busyStep, LOADING_STEPS.length - 1)];
     return (
       <Shell onExit={() => nav("/")}>
         <div className="mx-auto flex max-w-lg flex-col items-center py-20 text-center">
           <Icon icon="ph:spinner-gap-bold" className="animate-spin text-6xl text-emerald-500" />
           <h1 className="mt-6 text-3xl font-bold">그림을 만들고 있어요</h1>
+          <p className="mt-3 flex items-center gap-2 text-xl font-semibold text-emerald-700 dark:text-emerald-300">
+            <Icon icon={msg.icon} className="text-[24px]" />
+            {msg.text}
+          </p>
           <p className="mt-2 text-lg text-neutral-500 dark:text-neutral-400">
             30초쯤 걸려요. 잠시만 기다려 주세요.
           </p>
+          {/* 진행 점 */}
+          <div className="mt-5 flex gap-2">
+            {LOADING_STEPS.map((_, i) => (
+              <span key={i} className={`h-2.5 w-2.5 rounded-full ${i <= busyStep ? "bg-emerald-500" : "bg-neutral-200 dark:bg-neutral-700"}`} />
+            ))}
+          </div>
         </div>
       </Shell>
     );

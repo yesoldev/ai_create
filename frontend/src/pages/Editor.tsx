@@ -2,14 +2,16 @@ import { useEffect, useRef, useState, useCallback, type FormEvent } from "react"
 import { useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "@iconify/react";
 import { Canvas, IText, Rect, Circle, type FabricObject } from "fabric";
-import { saveTemplate } from "../lib/library";
+import { saveTemplate, updateTemplate } from "../lib/library";
 import { listFolders, withDepth, type Folder } from "../lib/folders";
+import { ConfirmDialog } from "../components/dialogs";
 
 interface EditorState {
   imageUrl?: string;
   w?: number;
   h?: number;
   generationId?: string;
+  templateId?: string; // 연결된 프로젝트(템플릿)
   canvasJson?: Record<string, unknown>;
   templateName?: string;
 }
@@ -45,6 +47,8 @@ export default function Editor() {
   const [saving, setSaving] = useState(false);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [folderId, setFolderId] = useState<string>("");
+  const [dirty, setDirty] = useState(false);
+  const [leaveOpen, setLeaveOpen] = useState(false);
 
   useEffect(() => {
     listFolders().then(setFolders).catch(() => {});
@@ -58,6 +62,7 @@ export default function Editor() {
     histIndex.current = history.current.length - 1;
     setCanUndo(histIndex.current > 0);
     setCanRedo(false);
+    setDirty(true);
   }, []);
 
   const restore = useCallback(async (json: string) => {
@@ -270,20 +275,52 @@ export default function Editor() {
     setSaving(true);
     setSaveMsg("");
     try {
-      await saveTemplate({
-        name: tplName.trim(),
-        canvas_json: c.toJSON() as Record<string, unknown>,
-        size_w: natSize.current.w,
-        size_h: natSize.current.h,
-        generation_id: st.generationId,
-        folder_id: folderId || null,
-      });
+      const canvas = c.toJSON() as Record<string, unknown>;
+      if (st.templateId) {
+        await updateTemplate(st.templateId, { name: tplName.trim(), canvas_json: canvas, folder_id: folderId || null, move_to_root: !folderId });
+      } else {
+        await saveTemplate({
+          name: tplName.trim(),
+          canvas_json: canvas,
+          size_w: natSize.current.w,
+          size_h: natSize.current.h,
+          generation_id: st.generationId,
+          folder_id: folderId || null,
+        });
+      }
       setShowSave(false);
+      setDirty(false);
       setSaveMsg("보관함에 저장했어요.");
     } catch {
       setSaveMsg("저장에 실패했어요. 다시 시도해 주세요.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  // 나가기 처리 — 변경사항 있으면 확인
+  function tryLeave() {
+    if (dirty) setLeaveOpen(true);
+    else nav(-1);
+  }
+  function doLeave() {
+    setLeaveOpen(false);
+    setDirty(false);
+    nav(-1);
+  }
+  async function saveThenLeave() {
+    const c = fabricRef.current;
+    if (c && st.templateId) {
+      try {
+        await updateTemplate(st.templateId, { canvas_json: c.toJSON() as Record<string, unknown> });
+      } catch {
+        /* 무시하고 진행 */
+      }
+      doLeave();
+    } else {
+      // 연결된 프로젝트가 없으면 이름 정해 저장
+      setLeaveOpen(false);
+      setShowSave(true);
     }
   }
 
@@ -294,7 +331,7 @@ export default function Editor() {
   return (
     <div className="flex min-h-screen flex-col bg-neutral-100 dark:bg-neutral-950">
       <header className="flex items-center justify-between border-b border-neutral-200 bg-white px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900">
-        <button onClick={() => nav(-1)} className={tool}>
+        <button onClick={tryLeave} className={tool}>
           <Icon icon="ph:arrow-left-bold" /> 뒤로
         </button>
         <div className="flex items-center gap-2 font-semibold">
@@ -318,6 +355,19 @@ export default function Editor() {
           {saveMsg}
         </div>
       )}
+
+      <ConfirmDialog
+        open={leaveOpen}
+        icon="ph:floppy-disk-duotone"
+        title="저장하시겠습니까?"
+        desc="지금까지 바꾼 내용을 보관함에 저장할 수 있어요."
+        onClose={() => setLeaveOpen(false)}
+        actions={[
+          { label: "저장하고 나가기", tone: "primary", icon: "ph:check-bold", onClick: saveThenLeave },
+          { label: "저장 안 하고 나가기", tone: "ghost", icon: "ph:x-bold", onClick: doLeave },
+          { label: "취소 (계속 편집)", tone: "soft", onClick: () => setLeaveOpen(false) },
+        ]}
+      />
 
       {showSave && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowSave(false)}>

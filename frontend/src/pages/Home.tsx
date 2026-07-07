@@ -4,6 +4,7 @@ import { Icon } from "@iconify/react";
 import { api } from "../lib/api";
 import { krw } from "../lib/studio";
 import { useAuth } from "../lib/auth";
+import { listTemplates, getTemplate, type TemplateListItem } from "../lib/library";
 
 interface Usage {
   monthly_limit_krw: number | null;
@@ -12,23 +13,45 @@ interface Usage {
 }
 interface Gen {
   id: string;
+  template_id: string | null;
   prompt: string;
   size: string;
-  cost_krw: number;
   thumb_url: string;
-  created_at: string;
 }
 
 export default function Home() {
   const { user, logout } = useAuth();
   const nav = useNavigate();
   const [usage, setUsage] = useState<Usage | null>(null);
+  const [projects, setProjects] = useState<TemplateListItem[]>([]);
   const [gens, setGens] = useState<Gen[]>([]);
+  const [opening, setOpening] = useState(false);
 
   useEffect(() => {
     api.get<Usage>("/api/usage/me").then((r) => setUsage(r.data)).catch(() => {});
+    listTemplates().then(setProjects).catch(() => {});
     api.get<{ items: Gen[] }>("/api/generations").then((r) => setGens(r.data.items)).catch(() => {});
   }, []);
+
+  async function openProject(templateId: string) {
+    if (opening) return;
+    setOpening(true);
+    try {
+      const t = await getTemplate(templateId);
+      nav("/editor", {
+        state: {
+          imageUrl: t.bg_url || undefined,
+          w: t.size_w || 1024,
+          h: t.size_h || 1024,
+          canvasJson: t.canvas_json || undefined,
+          templateName: t.name,
+          templateId: t.id,
+        },
+      });
+    } finally {
+      setOpening(false);
+    }
+  }
 
   const pct =
     usage && usage.monthly_limit_krw
@@ -59,28 +82,11 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-4xl px-5 py-8">
-        <h1 className="text-3xl font-bold tracking-tight">
-          안녕하세요, {user?.name || "회원"}님
-        </h1>
+      <main className="mx-auto max-w-5xl px-5 py-8">
+        <h1 className="text-3xl font-bold tracking-tight">안녕하세요, {user?.name || "회원"}님</h1>
         <p className="mt-2 text-lg text-neutral-500 dark:text-neutral-400">오늘도 멋진 홍보물을 만들어 보세요.</p>
 
-        {/* 큰 만들기 버튼 */}
-        <button
-          onClick={() => nav("/studio")}
-          className="mt-6 flex w-full items-center gap-4 rounded-3xl bg-emerald-600 p-6 text-left text-white shadow-lg shadow-emerald-600/25 transition hover:bg-emerald-500 active:scale-[0.995]"
-        >
-          <span className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl bg-white/15">
-            <Icon icon="ph:magic-wand-duotone" className="text-[36px]" />
-          </span>
-          <span>
-            <span className="block text-2xl font-bold">새 홍보물 만들기</span>
-            <span className="block text-lg text-emerald-50/90">배너·전단지를 몇 번의 클릭으로</span>
-          </span>
-          <Icon icon="ph:arrow-right-bold" className="ml-auto text-[28px]" />
-        </button>
-
-        {/* 잔여 한도 */}
+        {/* 1) 이번 달 남은 금액 */}
         <div className="mt-6 rounded-3xl border-2 border-neutral-200 bg-white p-6 dark:border-neutral-800 dark:bg-neutral-900">
           <div className="flex items-center gap-2 text-lg font-semibold">
             <Icon icon="ph:wallet-duotone" className="text-emerald-500 text-[24px]" />
@@ -88,9 +94,7 @@ export default function Home() {
           </div>
           {usage && (
             <>
-              <p className="mt-2 text-3xl font-bold">
-                {usage.remaining_krw === null ? "제한 없음" : krw(usage.remaining_krw)}
-              </p>
+              <p className="mt-2 text-3xl font-bold">{usage.remaining_krw === null ? "제한 없음" : krw(usage.remaining_krw)}</p>
               {usage.monthly_limit_krw !== null && (
                 <>
                   <div className="mt-3 h-3 w-full overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
@@ -105,23 +109,119 @@ export default function Home() {
           )}
         </div>
 
-        {/* 최근 작업 */}
-        <h2 className="mt-10 text-2xl font-bold">최근 만든 것</h2>
-        {gens.length === 0 ? (
-          <div className="mt-4 rounded-3xl border-2 border-dashed border-neutral-300 p-12 text-center text-lg text-neutral-400 dark:border-neutral-700">
-            아직 만든 홍보물이 없어요. 위 버튼으로 시작해 보세요.
-          </div>
-        ) : (
-          <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
-            {gens.map((g) => (
-              <div key={g.id} className="overflow-hidden rounded-2xl border-2 border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
-                <img src={g.thumb_url} alt={g.prompt} className="aspect-square w-full object-cover" loading="lazy" />
-                <p className="truncate px-3 py-2 text-sm text-neutral-500 dark:text-neutral-400">{g.size}</p>
-              </div>
-            ))}
-          </div>
-        )}
+        {/* 2) 프로젝트 (횡스크롤) */}
+        <Row
+          title="내 프로젝트"
+          icon="ph:cards-three-duotone"
+          onMore={() => nav("/library")}
+          empty="아직 프로젝트가 없어요. 아래에서 새로 만들어 보세요."
+          items={projects.map((p) => ({
+            id: p.id,
+            name: p.name,
+            sub: `${p.size_w}×${p.size_h}`,
+            thumb: p.thumb_url,
+            onClick: () => openProject(p.id),
+          }))}
+        />
+
+        {/* 3) 최근 만든 것 (횡스크롤) */}
+        <Row
+          title="최근 만든 것"
+          icon="ph:clock-counter-clockwise-duotone"
+          empty="아직 만든 홍보물이 없어요."
+          items={gens.map((g) => ({
+            id: g.id,
+            name: g.prompt?.slice(0, 16) || "홍보물",
+            sub: g.size,
+            thumb: g.thumb_url,
+            onClick: g.template_id ? () => openProject(g.template_id!) : undefined,
+          }))}
+        />
+
+        {/* 4) 새 홍보물 만들기 */}
+        <button
+          onClick={() => nav("/studio")}
+          className="mt-8 flex w-full items-center gap-4 rounded-3xl bg-emerald-600 p-6 text-left text-white shadow-lg shadow-emerald-600/25 transition hover:bg-emerald-500 active:scale-[0.995]"
+        >
+          <span className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl bg-white/15">
+            <Icon icon="ph:magic-wand-duotone" className="text-[36px]" />
+          </span>
+          <span>
+            <span className="block text-2xl font-bold">새 홍보물 만들기</span>
+            <span className="block text-lg text-emerald-50/90">배너·전단지를 몇 번의 클릭으로</span>
+          </span>
+          <Icon icon="ph:arrow-right-bold" className="ml-auto text-[28px]" />
+        </button>
       </main>
+
+      {opening && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/30">
+          <Icon icon="ph:spinner-gap-bold" className="animate-spin text-5xl text-emerald-500" />
+        </div>
+      )}
     </div>
+  );
+}
+
+interface RowItem {
+  id: string;
+  name: string;
+  sub: string;
+  thumb?: string;
+  onClick?: () => void;
+}
+
+function Row({
+  title,
+  icon,
+  items,
+  empty,
+  onMore,
+}: {
+  title: string;
+  icon: string;
+  items: RowItem[];
+  empty: string;
+  onMore?: () => void;
+}) {
+  return (
+    <section className="mt-8">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="flex items-center gap-2 text-2xl font-bold">
+          <Icon icon={icon} className="text-emerald-600" /> {title}
+        </h2>
+        {onMore && (
+          <button onClick={onMore} className="flex items-center gap-1 text-base text-emerald-700 hover:underline dark:text-emerald-300">
+            모두 보기 <Icon icon="ph:arrow-right-bold" />
+          </button>
+        )}
+      </div>
+      {items.length === 0 ? (
+        <div className="rounded-2xl border-2 border-dashed border-neutral-300 p-8 text-center text-base text-neutral-400 dark:border-neutral-700">
+          {empty}
+        </div>
+      ) : (
+        <div className="flex gap-4 overflow-x-auto pb-2 [scrollbar-width:thin]">
+          {items.map((it) => (
+            <button
+              key={it.id}
+              onClick={it.onClick}
+              disabled={!it.onClick}
+              className="w-40 shrink-0 overflow-hidden rounded-2xl border-2 border-neutral-200 bg-white text-left transition hover:border-emerald-400 disabled:hover:border-neutral-200 dark:border-neutral-800 dark:bg-neutral-900"
+            >
+              <div className="aspect-square bg-neutral-100 dark:bg-neutral-800">
+                {it.thumb ? (
+                  <img src={it.thumb} alt={it.name} className="h-full w-full object-cover" loading="lazy" />
+                ) : (
+                  <div className="grid h-full place-items-center text-neutral-300"><Icon icon="ph:image-duotone" className="text-3xl" /></div>
+                )}
+              </div>
+              <p className="truncate px-2.5 pt-2 text-sm font-semibold">{it.name}</p>
+              <p className="px-2.5 pb-2 text-xs text-neutral-400">{it.sub}</p>
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }

@@ -39,6 +39,13 @@ export async function saveTemplate(body: {
   return (await api.post("/api/templates", body)).data;
 }
 
+export async function updateTemplate(
+  id: string,
+  body: { name?: string; canvas_json?: Record<string, unknown>; folder_id?: string | null; move_to_root?: boolean },
+): Promise<void> {
+  await api.patch(`/api/templates/${id}`, body);
+}
+
 export async function deleteTemplate(id: string): Promise<void> {
   await api.delete(`/api/templates/${id}`);
 }

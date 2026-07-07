@@ -16,7 +16,7 @@ async function reachResult(page: Page) {
     route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ generation_id: "t", image_url: FAKE_PNG, thumb_url: FAKE_PNG, size: "1024x400", cost_krw: 12, remaining_krw: null }),
+      body: JSON.stringify({ generation_id: "t", project_id: "t", image_url: FAKE_PNG, thumb_url: FAKE_PNG, size: "1024x400", cost_krw: 12, remaining_krw: null }),
     }),
   );
   await page.getByRole("button", { name: /새 홍보물 만들기/ }).click();
@@ -58,4 +58,24 @@ test("편집기: 결과에서 열어 글자 추가·되돌리기·저장", async
   await page.getByRole("button", { name: "PNG", exact: true }).click();
   const d = await dl;
   expect(d.suggestedFilename()).toMatch(/홍보물_\d{8}\.png/);
+});
+
+test("편집기: 변경 후 나가면 저장 확인 모달이 뜬다", async ({ page }) => {
+  await login(page);
+  await page.route("**/api/templates/*", (r) => r.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
+  await reachResult(page);
+  await page.getByRole("button", { name: /글자 넣고 꾸미기/ }).click();
+  await page.getByRole("button", { name: "글자 넣기" }).click(); // 변경 발생
+
+  // 뒤로 → 저장 확인 모달
+  await page.getByRole("button", { name: "뒤로" }).click();
+  await expect(page.getByRole("heading", { name: "저장하시겠습니까?" })).toBeVisible();
+  // 취소 → 계속 편집(모달 닫힘, 편집기 유지)
+  await page.getByRole("button", { name: /취소 \(계속 편집\)/ }).click();
+  await expect(page.getByRole("heading", { name: "저장하시겠습니까?" })).toBeHidden();
+  await expect(page).toHaveURL(/\/editor$/);
+  // 다시 뒤로 → 저장 안 하고 나가기 → 편집기 벗어남
+  await page.getByRole("button", { name: "뒤로" }).click();
+  await page.getByRole("button", { name: /저장 안 하고 나가기/ }).click();
+  await expect(page).not.toHaveURL(/\/editor$/);
 });

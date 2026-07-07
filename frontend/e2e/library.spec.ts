@@ -60,10 +60,25 @@ test("보관함: 편집기에서 저장하고 다시 열기", async ({ page }) =
   await saveReq;
   await expect(page.getByText("보관함에 저장했어요.")).toBeVisible();
 
-  // 보관함으로 이동 → 폴더 트리 + 항목 확인 → 다시 열기
+  // 보관함으로 이동 → 폴더 트리 + 항목 확인
   await page.goto("/library");
   await expect(page.getByRole("button", { name: /OO식당/ })).toBeVisible();
   await expect(page.getByText("봄맞이 배너")).toBeVisible();
+
+  // 새 폴더 — 예쁜 입력 모달(window.prompt 아님)
+  await page.route("**/api/folders", (route) =>
+    route.request().method() === "POST"
+      ? route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: "f2", parent_id: null, name: "미래부동산", sort_order: 1 }) })
+      : route.continue(),
+  );
+  await page.getByRole("button", { name: /새 폴더/ }).click();
+  await expect(page.getByRole("heading", { name: "새 폴더 만들기" })).toBeVisible();
+  const createReq = page.waitForRequest((r) => r.url().endsWith("/api/folders") && r.method() === "POST");
+  await page.getByPlaceholder("예) 행복식당").fill("미래부동산");
+  await page.getByRole("button", { name: /^만들기/ }).click();
+  await createReq;
+
+  // 항목 다시 열기
   await page.getByText("봄맞이 배너").click();
   await expect(page).toHaveURL(/\/editor$/);
   await expect(page.getByRole("button", { name: "글자 넣기" })).toBeVisible();

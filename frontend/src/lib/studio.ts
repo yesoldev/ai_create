@@ -75,6 +75,7 @@ export async function fetchEstimate(w: number, h: number, quality: string): Prom
 
 export interface GenerateResult {
   generation_id: string;
+  project_id: string;
   image_url: string;
   thumb_url: string;
   size: string;
