@@ -61,6 +61,7 @@ export default function Studio() {
   const [step, setStep] = useState(1);
   const [kind, setKind] = useState<Kind | null>(null);
   const [biz, setBiz] = useState<BizType | null>(null);
+  const [bizEtc, setBizEtc] = useState(""); // "기타" 선택 시 직접 입력
   const [size, setSize] = useState<SizePreset | null>(null);
   // 직접 크기 입력
   const [custom, setCustom] = useState(false);
@@ -93,6 +94,9 @@ export default function Studio() {
   const effW = custom ? Math.min(toPx(cw, unit), MAX_PX) : size?.w ?? 0;
   const effH = custom ? Math.min(toPx(ch, unit), MAX_PX) : size?.h ?? 0;
 
+  // 업종 표시/주입용 라벨 ("기타"면 직접 입력값)
+  const bizLabel = biz ? (biz.key === "etc" ? bizEtc.trim() || "기타" : biz.label) : "";
+
   // 크기·품질 바뀌면 예상비용/앞으로 N장 갱신
   useEffect(() => {
     if (!effW || !effH) return;
@@ -107,11 +111,11 @@ export default function Studio() {
 
   const canNext = useMemo(() => {
     if (step === 1) return !!kind;
-    if (step === 2) return !!biz;
+    if (step === 2) return !!biz && (biz.key !== "etc" || bizEtc.trim().length > 0);
     if (step === 3) return custom ? cw > 0 && ch > 0 : !!size;
     if (step === 4) return description.trim().length > 0;
     return true;
-  }, [step, kind, biz, size, custom, cw, ch, description]);
+  }, [step, kind, biz, bizEtc, size, custom, cw, ch, description]);
 
   function pickKind(k: Kind) {
     setKind(k);
@@ -122,6 +126,7 @@ export default function Studio() {
 
   function pickBiz(b: BizType) {
     setBiz(b);
+    if (b.key === "etc") return; // 직접 입력 후 [다음]으로 진행
     setStep(3);
   }
 
@@ -136,7 +141,7 @@ export default function Studio() {
         refUploadId = await uploadRef(refFile);
       }
       const hasRef = !!refGenerationId || !!refUploadId;
-      const fullPrompt = `${biz ? `[업종: ${biz.label}] ` : ""}${description}. ${NEWSPAPER_HINT}`;
+      const fullPrompt = `${bizLabel ? `[업종: ${bizLabel}] ` : ""}${description}. ${NEWSPAPER_HINT}`;
       const r = await generate({
         prompt: fullPrompt,
         width: effW,
@@ -166,6 +171,7 @@ export default function Studio() {
     setStep(1);
     setKind(null);
     setBiz(null);
+    setBizEtc("");
     setSize(null);
     setDescription("");
     setTextContent("");
@@ -302,6 +308,22 @@ export default function Studio() {
                 />
               ))}
             </div>
+
+            {biz?.key === "etc" && (
+              <div className="mt-4">
+                <label htmlFor="bizetc" className="mb-2 block text-lg font-semibold">
+                  업종을 직접 적어 주세요
+                </label>
+                <input
+                  id="bizetc"
+                  autoFocus
+                  value={bizEtc}
+                  onChange={(e) => setBizEtc(e.target.value)}
+                  placeholder="예) 세탁소, 학원, 동물병원"
+                  className="h-14 w-full max-w-md rounded-2xl border-2 border-neutral-200 bg-neutral-50 px-4 text-lg outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15 dark:border-neutral-800 dark:bg-neutral-900"
+                />
+              </div>
+            )}
           </Section>
         )}
 
@@ -493,7 +515,7 @@ export default function Studio() {
           <Section title="이대로 만들까요?" desc="확인하고 만들기를 눌러 주세요.">
             <dl className="divide-y divide-neutral-200 rounded-2xl border-2 border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
               <SummaryRow label="종류" value={kind === "banner" ? "배너" : "전단지"} />
-              <SummaryRow label="업종" value={biz?.label ?? "-"} />
+              <SummaryRow label="업종" value={bizLabel || "-"} />
               <SummaryRow
                 label="크기"
                 value={custom ? `직접 (${effW}×${effH})` : `${size!.label} (${size!.w}×${size!.h})`}

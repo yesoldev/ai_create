@@ -81,6 +81,36 @@ test("스튜디오 마법사로 배너를 만든다 (생성 모킹)", async ({ p
   await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
 });
 
+test("업종 '기타' 선택 시 직접 입력칸이 뜨고 프롬프트에 반영된다", async ({ page }) => {
+  await login(page);
+  let sent: Record<string, unknown> = {};
+  await page.route("**/api/generate", (route) => {
+    sent = route.request().postDataJSON();
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ generation_id: "g", image_url: FAKE_PNG, thumb_url: FAKE_PNG, size: "500x200", cost_krw: 8, remaining_krw: null }) });
+  });
+
+  await page.getByRole("button", { name: /새 홍보물 만들기/ }).click();
+  await page.getByRole("button", { name: /배너/ }).first().click();
+  // 기타 선택 → 자동 진행 안 함, 입력칸 표시
+  await page.getByRole("button", { name: "기타" }).click();
+  await expect(page.getByLabel("업종을 직접 적어 주세요")).toBeVisible();
+  await expect(page.getByRole("button", { name: "다음", exact: true })).toBeDisabled();
+  await page.getByLabel("업종을 직접 적어 주세요").fill("세탁소");
+  await expect(page.getByRole("button", { name: "다음", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "다음", exact: true }).click();
+
+  await expect(page.getByRole("heading", { name: "크기와 품질을 골라요" })).toBeVisible();
+  await page.getByRole("button", { name: /보통 \(추천\)/ }).click();
+  await page.getByRole("button", { name: "다음", exact: true }).click();
+  await page.getByLabel("만들고 싶은 그림 설명").fill("깨끗한 세탁 서비스");
+  await page.getByRole("button", { name: "다음", exact: true }).click();
+  await expect(page.getByText("세탁소", { exact: false })).toBeVisible(); // 요약에 업종
+  await page.getByRole("button", { name: "만들기", exact: true }).click();
+
+  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
+  expect(String(sent.prompt)).toContain("[업종: 세탁소]");
+});
+
 test("참고할 사진을 첨부하면 ref_upload_id로 생성된다", async ({ page }) => {
   await login(page);
   await page.route("**/api/refs/upload", (r) =>
