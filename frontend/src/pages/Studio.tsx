@@ -11,6 +11,7 @@ import {
   fetchEstimate,
   generate,
   uploadRef,
+  copywrite,
   krw,
   type Estimate,
   type GenerateResult,
@@ -70,6 +71,19 @@ export default function Studio() {
   const [description, setDescription] = useState("");
   const [textContent, setTextContent] = useState("");
   const [refFile, setRefFile] = useState<File | null>(null);
+  const [copyIdeas, setCopyIdeas] = useState<string[]>([]);
+  const [copyBusy, setCopyBusy] = useState(false);
+
+  async function suggestCopy() {
+    setCopyBusy(true);
+    try {
+      setCopyIdeas(await copywrite(biz?.label || "가게", description || "홍보"));
+    } catch {
+      setCopyIdeas([]);
+    } finally {
+      setCopyBusy(false);
+    }
+  }
   const [estimate, setEstimate] = useState<Estimate | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -156,6 +170,7 @@ export default function Studio() {
     setDescription("");
     setTextContent("");
     setRefFile(null);
+    setCopyIdeas([]);
   }
 
   // 마법사 도중 이탈 시 입력 손실 확인
@@ -412,9 +427,34 @@ export default function Studio() {
               placeholder="예) 봄맞이 할인 행사 배너, 벚꽃과 밝은 분홍색 배경"
               className="w-full rounded-2xl border-2 border-neutral-200 bg-neutral-50 p-4 text-lg outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15 dark:border-neutral-800 dark:bg-neutral-900"
             />
-            <label htmlFor="txt" className="mb-2 mt-6 block text-lg font-semibold">
-              그림에 넣을 글자 <span className="font-normal text-neutral-400">(없으면 비워 두세요)</span>
-            </label>
+            <div className="mb-2 mt-6 flex flex-wrap items-center gap-2">
+              <label htmlFor="txt" className="text-lg font-semibold">
+                그림에 넣을 글자 <span className="font-normal text-neutral-400">(없으면 비워 두세요)</span>
+              </label>
+              <button
+                type="button"
+                onClick={suggestCopy}
+                disabled={copyBusy}
+                className="flex h-9 items-center gap-1.5 rounded-full border-2 border-emerald-300 px-3 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 dark:text-emerald-300 dark:hover:bg-emerald-950/30"
+              >
+                <Icon icon={copyBusy ? "ph:spinner-gap-bold" : "ph:sparkle-duotone"} className={copyBusy ? "animate-spin" : ""} />
+                {copyBusy ? "생각 중..." : "문구 추천받기"}
+              </button>
+            </div>
+            {copyIdeas.length > 0 && (
+              <div className="mb-3 flex flex-wrap gap-2">
+                {copyIdeas.map((idea, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => setTextContent(idea)}
+                    className="rounded-xl border-2 border-neutral-200 px-3 py-2 text-left text-base hover:border-emerald-400 hover:bg-emerald-50 dark:border-neutral-700 dark:hover:bg-emerald-950/30"
+                  >
+                    {idea}
+                  </button>
+                ))}
+              </div>
+            )}
             <input
               id="txt"
               value={textContent}
