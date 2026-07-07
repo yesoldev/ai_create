@@ -13,7 +13,7 @@ test("올바른 계정으로 로그인하면 홈으로 이동한다", async ({ p
 
   // Supabase 실서버 왕복(로그인+프로필)에 시간이 걸릴 수 있어 넉넉히 대기
   await expect(page).toHaveURL("http://localhost:5173/", { timeout: 15_000 });
-  await expect(page.getByText(ADMIN_EMAIL)).toBeVisible();
+  await expect(page.getByRole("button", { name: /새 홍보물 만들기/ })).toBeVisible();
 });
 
 test("틀린 비밀번호는 오류 메시지를 보여준다", async ({ page }) => {

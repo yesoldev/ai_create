@@ -17,6 +17,18 @@ from config import (
 client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
 
+def _usage_dict(resp) -> dict:
+    """응답의 usage를 dict로 안전 추출 (SDK 버전에 따라 pydantic/ dict 혼재)."""
+    u = getattr(resp, "usage", None)
+    if u is None:
+        return {}
+    if hasattr(u, "model_dump"):
+        return u.model_dump()
+    if isinstance(u, dict):
+        return u
+    return {}
+
+
 def snap_size(width: int, height: int) -> tuple[int, int, bool]:
     """요청 px을 16배수로 스냅하고 최대치로 clamp.
 
@@ -49,7 +61,7 @@ async def generate_image(
         n=1,
     )
     b64 = resp.data[0].b64_json
-    usage = resp.usage.model_dump() if getattr(resp, "usage", None) else {}
+    usage = _usage_dict(resp)
     return base64.b64decode(b64), usage
 
 
@@ -74,7 +86,7 @@ async def inpaint_image(
         n=1,
     )
     b64 = resp.data[0].b64_json
-    usage = resp.usage.model_dump() if getattr(resp, "usage", None) else {}
+    usage = _usage_dict(resp)
     return base64.b64decode(b64), usage
 
 
