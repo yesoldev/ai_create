@@ -65,3 +65,13 @@ export function krw(n: number | null | undefined): string {
   if (n === null || n === undefined) return "무제한";
   return `${Math.round(n).toLocaleString("ko-KR")}원`;
 }
+
+export type Unit = "px" | "mm" | "cm";
+export const MAX_PX = 3840; // 백엔드 SIZE_MAX 와 동일
+
+// 단위 값을 px로 환산 (mm/cm는 DPI 기준). 백엔드 to_px 와 동일 규칙.
+export function toPx(value: number, unit: Unit, dpi = 300): number {
+  if (unit === "px") return Math.round(value);
+  if (unit === "mm") return Math.round((value * dpi) / 25.4);
+  return Math.round((value * 10 * dpi) / 25.4); // cm
+}

@@ -64,3 +64,37 @@ test("스튜디오 마법사로 배너를 만든다 (생성 모킹)", async ({ p
   await expect(page.getByRole("button", { name: /PNG로 내려받기/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /JPG로 내려받기/ })).toBeVisible();
 });
+
+test("직접 크기(mm) 입력이 px로 환산되어 생성된다", async ({ page }) => {
+  await login(page);
+  let sentBody: Record<string, unknown> = {};
+  await page.route("**/api/generate", async (route) => {
+    sentBody = route.request().postDataJSON();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ generation_id: "t", image_url: FAKE_PNG, thumb_url: FAKE_PNG, size: "x", cost_krw: 5, remaining_krw: null }),
+    });
+  });
+
+  await page.getByRole("button", { name: /새 홍보물 만들기/ }).click();
+  await page.getByRole("button", { name: /전단지/ }).first().click();
+
+  // 직접 크기 → 100 x 200 mm, mm 단위
+  await page.getByRole("button", { name: "직접 크기 정하기" }).click();
+  await page.getByLabel("가로").fill("100");
+  await page.getByLabel("세로").fill("200");
+  await page.getByRole("button", { name: "mm", exact: true }).click();
+  // 100mm @300DPI ≈ 1181px, 200mm ≈ 2362px
+  await expect(page.getByText(/1181×2362 px/)).toBeVisible();
+
+  await page.getByRole("button", { name: "다음", exact: true }).click();
+  await page.getByLabel("만들고 싶은 그림 설명").fill("동네 청소 안내 전단지");
+  await page.getByRole("button", { name: "다음", exact: true }).click();
+  await page.getByRole("button", { name: "만들기", exact: true }).click();
+
+  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
+  // 서버로 환산된 px가 전달됐는지 확인
+  expect(sentBody.width).toBe(1181);
+  expect(sentBody.height).toBe(2362);
+});

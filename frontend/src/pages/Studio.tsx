@@ -3,12 +3,15 @@ import { useNavigate } from "react-router-dom";
 import { Icon } from "@iconify/react";
 import {
   SIZES,
+  MAX_PX,
+  toPx,
   fetchEstimate,
   generate,
   krw,
   type Estimate,
   type GenerateResult,
   type SizePreset,
+  type Unit,
 } from "../lib/studio";
 
 type Kind = "banner" | "flyer";
@@ -52,6 +55,11 @@ export default function Studio() {
   const [step, setStep] = useState(1);
   const [kind, setKind] = useState<Kind | null>(null);
   const [size, setSize] = useState<SizePreset | null>(null);
+  // 직접 크기 입력
+  const [custom, setCustom] = useState(false);
+  const [cw, setCw] = useState(1024);
+  const [ch, setCh] = useState(400);
+  const [unit, setUnit] = useState<Unit>("px");
   const [quality, setQuality] = useState("medium");
   const [description, setDescription] = useState("");
   const [textContent, setTextContent] = useState("");
@@ -60,40 +68,45 @@ export default function Studio() {
   const [error, setError] = useState("");
   const [result, setResult] = useState<GenerateResult | null>(null);
 
+  // 실제 생성 크기(px): 직접 입력이면 환산+상한, 아니면 프리셋
+  const effW = custom ? Math.min(toPx(cw, unit), MAX_PX) : size?.w ?? 0;
+  const effH = custom ? Math.min(toPx(ch, unit), MAX_PX) : size?.h ?? 0;
+
   // 크기·품질 바뀌면 예상비용/앞으로 N장 갱신
   useEffect(() => {
-    if (!size) return;
+    if (!effW || !effH) return;
     let alive = true;
-    fetchEstimate(size.w, size.h, quality)
+    fetchEstimate(effW, effH, quality)
       .then((e) => alive && setEstimate(e))
       .catch(() => alive && setEstimate(null));
     return () => {
       alive = false;
     };
-  }, [size, quality]);
+  }, [effW, effH, quality]);
 
   const canNext = useMemo(() => {
     if (step === 1) return !!kind;
-    if (step === 2) return !!size;
+    if (step === 2) return custom ? cw > 0 && ch > 0 : !!size;
     if (step === 3) return description.trim().length > 0;
     return true;
-  }, [step, kind, size, description]);
+  }, [step, kind, size, custom, cw, ch, description]);
 
   function pickKind(k: Kind) {
     setKind(k);
     setSize(SIZES[k][0]);
+    setCustom(false);
     setStep(2);
   }
 
   async function onGenerate() {
-    if (!size) return;
+    if (!effW || !effH) return;
     setBusy(true);
     setError("");
     try {
       const r = await generate({
         prompt: description,
-        width: size.w,
-        height: size.h,
+        width: effW,
+        height: effH,
         quality,
         mode: "ai_text",
         text_content: textContent.trim() || undefined,
@@ -225,14 +238,75 @@ export default function Studio() {
               {SIZES[kind].map((s) => (
                 <ChoiceCard
                   key={s.key}
-                  active={size?.key === s.key}
+                  active={!custom && size?.key === s.key}
                   icon="ph:frame-corners-duotone"
                   title={s.label}
                   desc={`${s.hint} · ${s.w}×${s.h}`}
-                  onClick={() => setSize(s)}
+                  onClick={() => {
+                    setCustom(false);
+                    setSize(s);
+                  }}
                 />
               ))}
+              <ChoiceCard
+                active={custom}
+                icon="ph:ruler-duotone"
+                title="직접 크기 정하기"
+                desc="원하는 가로·세로를 입력해요"
+                onClick={() => setCustom(true)}
+              />
             </div>
+
+            {custom && (
+              <div className="mt-3 rounded-2xl border-2 border-emerald-200 bg-emerald-50/50 p-5 dark:border-emerald-900/50 dark:bg-emerald-950/20">
+                <div className="flex flex-wrap items-end gap-3">
+                  <label className="block">
+                    <span className="mb-1 block text-base font-semibold">가로</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={cw}
+                      onChange={(e) => setCw(Number(e.target.value))}
+                      className="h-12 w-28 rounded-xl border-2 border-neutral-200 bg-white px-3 text-lg outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-900"
+                    />
+                  </label>
+                  <span className="pb-3 text-lg text-neutral-400">×</span>
+                  <label className="block">
+                    <span className="mb-1 block text-base font-semibold">세로</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={ch}
+                      onChange={(e) => setCh(Number(e.target.value))}
+                      className="h-12 w-28 rounded-xl border-2 border-neutral-200 bg-white px-3 text-lg outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-900"
+                    />
+                  </label>
+                  <div className="flex gap-1 pb-0.5">
+                    {(["px", "mm", "cm"] as Unit[]).map((u) => (
+                      <button
+                        key={u}
+                        type="button"
+                        onClick={() => setUnit(u)}
+                        className={`h-12 w-14 rounded-xl text-lg font-semibold ${
+                          unit === u
+                            ? "bg-emerald-600 text-white"
+                            : "border-2 border-neutral-200 text-neutral-600 dark:border-neutral-700 dark:text-neutral-300"
+                        }`}
+                      >
+                        {u}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <p className="mt-3 text-base text-neutral-500 dark:text-neutral-400">
+                  실제 그림 크기: <b>{effW}×{effH}</b> px
+                  {unit !== "px" && " (300DPI 기준 환산)"}
+                  {(toPx(cw, unit) > MAX_PX || toPx(ch, unit) > MAX_PX) && (
+                    <span className="text-amber-600"> · 최대 {MAX_PX}px까지라 줄었어요</span>
+                  )}
+                </p>
+              </div>
+            )}
 
             <p className="mb-2 mt-6 text-lg font-semibold">품질</p>
             <div className="grid gap-3 sm:grid-cols-3">
@@ -278,11 +352,14 @@ export default function Studio() {
           </Section>
         )}
 
-        {step === 4 && size && (
+        {step === 4 && (size || custom) && (
           <Section title="이대로 만들까요?" desc="확인하고 만들기를 눌러 주세요.">
             <dl className="divide-y divide-neutral-200 rounded-2xl border-2 border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
               <SummaryRow label="종류" value={kind === "banner" ? "배너" : "전단지"} />
-              <SummaryRow label="크기" value={`${size.label} (${size.w}×${size.h})`} />
+              <SummaryRow
+                label="크기"
+                value={custom ? `직접 (${effW}×${effH})` : `${size!.label} (${size!.w}×${size!.h})`}
+              />
               <SummaryRow label="품질" value={QUALITIES.find((q) => q.key === quality)?.label ?? quality} />
               <SummaryRow label="설명" value={description} />
               {textContent.trim() && <SummaryRow label="넣을 글자" value={textContent} />}
