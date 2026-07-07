@@ -1,10 +1,15 @@
 @import "tailwindcss";
 
-/* 나이든 초보 사용자 기준: 큰 기본 글씨(16px+), 읽기 쉬운 시스템 폰트 */
+/* 다크모드는 시스템 설정(prefers-color-scheme) 자동 적용 — Tailwind v4 기본 dark: 변형 사용 */
+
 :root {
+  /* 나이든 초보 사용자 기준: 큰 기본 글씨, 한글 가독성 좋은 Pretendard */
   font-size: 17px;
-  font-family: "Pretendard", system-ui, "Segoe UI", "Malgun Gothic", sans-serif;
-  color-scheme: light;
+  font-family:
+    "Pretendard Variable", "Pretendard", system-ui, "Malgun Gothic", sans-serif;
+  color-scheme: light dark;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 html,
@@ -12,4 +17,40 @@ body,
 #root {
   margin: 0;
   min-height: 100vh;
+}
+
+/* 페이지 로드 시 순차 등장 */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.rise {
+  animation: rise 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* 브랜드 패널 오로라 미세 이동 */
+@keyframes drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(0, -4%, 0) scale(1.08);
+  }
+}
+.drift {
+  animation: drift 16s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise,
+  .drift {
+    animation: none;
+  }
 }

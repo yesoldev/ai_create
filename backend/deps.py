@@ -24,6 +24,7 @@ def _decode(token: str) -> dict:
             audience="authenticated",
             issuer=f"{settings.SUPABASE_URL}/auth/v1",
             options={"require": ["exp", "sub"]},
+            leeway=60,  # 로컬/서버 시계 오차(clock skew) 허용 — iat/nbf/exp 60초
         )
     except jwt.PyJWTError as e:
         raise HTTPException(
