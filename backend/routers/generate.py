@@ -122,13 +122,21 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
     await storage.upload("results", result_path, png, "image/png")
     await storage.upload("thumbs", thumb_path, storage.make_thumbnail(png), "image/jpeg")
 
-    # 6) 기록 + 사용량 가산
+    # 6) 프로젝트(템플릿) 자동 생성 + 생성 기록 + 사용량 가산
+    project_name = (body.text_content or body.prompt or "새 홍보물").strip()[:30] or "새 홍보물"
     with get_conn() as conn:
+        prow = conn.execute(
+            "insert into public.templates "
+            "(name, canvas_json, prompt, size_w, size_h, dpi, bg_image_path, thumb_path, created_by) "
+            "values (%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id",
+            (project_name, None, prompt, w, h, body.dpi, result_path, thumb_path, user["id"]),
+        ).fetchone()
+        project_id = prow["id"]
         conn.execute(
             "insert into public.generations "
             "(id, user_id, template_id, prompt, model, quality, size, ref_image_path, result_path, cost_krw) "
             "values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            (gid, user["id"], None, prompt, openai_client.IMAGE_MODEL,
+            (gid, user["id"], project_id, prompt, openai_client.IMAGE_MODEL,
              body.quality, f"{w}x{h}", ref_path, result_path, cost_krw),
         )
         ledger.add_usage(conn, user["id"], cost_krw)
@@ -137,6 +145,7 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
     image_url = await storage.signed_url("results", result_path)
     return {
         "generation_id": gid,
+        "project_id": project_id,
         "image_url": image_url,
         "thumb_url": storage.public_url("thumbs", thumb_path),
         "size": f"{w}x{h}",
@@ -212,7 +221,7 @@ async def copywrite(body: CopyBody, user: dict = Depends(get_current_user)):
 async def my_generations(user: dict = Depends(get_current_user), limit: int = 30):
     with get_conn() as conn:
         rows = conn.execute(
-            "select id, prompt, quality, size, cost_krw, result_path, created_at "
+            "select id, template_id, prompt, quality, size, cost_krw, result_path, created_at "
             "from public.generations where user_id=%s order by created_at desc limit %s",
             (user["id"], min(limit, 100)),
         ).fetchall()

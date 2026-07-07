@@ -92,18 +92,45 @@ async def get_template(tid: str, user: dict = Depends(get_current_user)):
     return row
 
 
+class TemplatePatch(BaseModel):
+    name: str | None = None
+    canvas_json: dict | None = None
+    folder_id: str | None = None
+    size_w: int | None = None
+    size_h: int | None = None
+    move_to_root: bool = False  # folder_id 를 null 로 만들기
+
+
 @router.patch("/{tid}")
-async def update(tid: str, body: TemplateBody, user: dict = Depends(get_current_user)):
+async def update(tid: str, body: TemplatePatch, user: dict = Depends(get_current_user)):
+    """부분 업데이트 — 전달된 필드만 갱신(배경/썸네일 등 미전달 필드는 보존)."""
     import json
 
+    sets: list[str] = []
+    params: list = []
+    if body.name is not None:
+        sets.append("name=%s")
+        params.append(body.name)
+    if body.canvas_json is not None:
+        sets.append("canvas_json=%s")
+        params.append(json.dumps(body.canvas_json))
+    if body.move_to_root:
+        sets.append("folder_id=NULL")
+    elif body.folder_id is not None:
+        sets.append("folder_id=%s")
+        params.append(body.folder_id)
+    if body.size_w is not None:
+        sets.append("size_w=%s")
+        params.append(body.size_w)
+    if body.size_h is not None:
+        sets.append("size_h=%s")
+        params.append(body.size_h)
+    if not sets:
+        raise HTTPException(400, "변경할 내용이 없습니다.")
+    params.append(tid)
     with get_conn() as conn:
         row = conn.execute(
-            "update public.templates set folder_id=%s, name=%s, canvas_json=%s, prompt=%s, "
-            "size_w=%s, size_h=%s, dpi=%s, bg_image_path=%s, thumb_path=%s where id=%s returning id",
-            (body.folder_id, body.name,
-             json.dumps(body.canvas_json) if body.canvas_json is not None else None,
-             body.prompt, body.size_w, body.size_h, body.dpi,
-             body.bg_image_path, body.thumb_path, tid),
+            f"update public.templates set {', '.join(sets)} where id=%s returning id", params
         ).fetchone()
     if not row:
         raise HTTPException(404, "템플릿을 찾을 수 없습니다.")
