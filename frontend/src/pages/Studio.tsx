@@ -181,7 +181,11 @@ export default function Studio() {
           <div className="mt-6">
             <BigButton
               icon="ph:pencil-simple-bold"
-              onClick={() => nav("/editor", { state: { imageUrl: result.image_url, w: effW, h: effH } })}
+              onClick={() =>
+                nav("/editor", {
+                  state: { imageUrl: result.image_url, w: effW, h: effH, generationId: result.generation_id },
+                })
+              }
             >
               글자 넣고 꾸미기
             </BigButton>

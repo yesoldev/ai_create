@@ -45,6 +45,9 @@ export default function Home() {
           홍보물 만들기
         </div>
         <div className="flex items-center gap-1">
+          <button onClick={() => nav("/library")} className="flex h-11 items-center gap-1 rounded-xl px-3 text-base text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800">
+            <Icon icon="ph:folders-duotone" /> 보관함
+          </button>
           {user?.role === "admin" && (
             <button onClick={() => nav("/admin")} className="flex h-11 items-center gap-1 rounded-xl px-3 text-base text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800">
               <Icon icon="ph:gear-duotone" /> 관리자

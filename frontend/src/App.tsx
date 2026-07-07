@@ -5,7 +5,7 @@ import Studio from "./pages/Studio";
 import Home from "./pages/Home";
 import Admin from "./pages/Admin";
 import Editor from "./pages/Editor";
-import { Library } from "./pages/placeholders";
+import Library from "./pages/Library";
 import type { ReactNode } from "react";
 
 function Loading() {

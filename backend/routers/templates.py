@@ -44,11 +44,25 @@ class TemplateBody(BaseModel):
     dpi: int = 300
     bg_image_path: str | None = None
     thumb_path: str | None = None
+    generation_id: str | None = None  # 있으면 원본/썸네일 경로 자동 연결
 
 
 @router.post("")
 async def create(body: TemplateBody, user: dict = Depends(get_current_user)):
     import json
+
+    bg_image_path = body.bg_image_path
+    thumb_path = body.thumb_path
+    # 생성물과 연결: 원본(results) 경로 + 썸네일(thumbs) 경로 자동 설정
+    if body.generation_id:
+        with get_conn() as conn:
+            g = conn.execute(
+                "select id, user_id, result_path from public.generations where id=%s",
+                (body.generation_id,),
+            ).fetchone()
+        if g:
+            bg_image_path = bg_image_path or g["result_path"]
+            thumb_path = thumb_path or f"{g['user_id']}/{g['id']}.jpg"
 
     with get_conn() as conn:
         row = conn.execute(
@@ -58,7 +72,7 @@ async def create(body: TemplateBody, user: dict = Depends(get_current_user)):
             (body.folder_id, body.name,
              json.dumps(body.canvas_json) if body.canvas_json is not None else None,
              body.prompt, body.size_w, body.size_h, body.dpi,
-             body.bg_image_path, body.thumb_path, user["id"]),
+             bg_image_path, thumb_path, user["id"]),
         ).fetchone()
     return {"id": row["id"]}
 
@@ -69,7 +83,13 @@ async def get_template(tid: str, user: dict = Depends(get_current_user)):
         row = conn.execute("select * from public.templates where id=%s", (tid,)).fetchone()
     if not row:
         raise HTTPException(404, "템플릿을 찾을 수 없습니다.")
-    return _with_thumb(row)
+    _with_thumb(row)
+    if row.get("bg_image_path"):
+        try:
+            row["bg_url"] = await storage.signed_url("results", row["bg_image_path"])
+        except Exception:  # noqa: BLE001
+            row["bg_url"] = None
+    return row
 
 
 @router.patch("/{tid}")

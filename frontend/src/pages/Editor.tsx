@@ -1,12 +1,16 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "@iconify/react";
 import { Canvas, IText, Rect, Circle, type FabricObject } from "fabric";
+import { saveTemplate } from "../lib/library";
 
 interface EditorState {
   imageUrl?: string;
   w?: number;
   h?: number;
+  generationId?: string;
+  canvasJson?: Record<string, unknown>;
+  templateName?: string;
 }
 
 function today(): string {
@@ -34,6 +38,10 @@ export default function Editor() {
   const [color, setColor] = useState("#111111");
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const [showSave, setShowSave] = useState(false);
+  const [tplName, setTplName] = useState(st.templateName || "");
+  const [saveMsg, setSaveMsg] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const snapshot = useCallback(() => {
     if (!fabricRef.current || restoring.current) return;
@@ -105,6 +113,15 @@ export default function Editor() {
 
       canvas.setDimensions({ width: natW, height: natH }); // 백킹 = 원본
       canvas.setDimensions({ width: `${dispW}px`, height: `${dispH}px` }, { cssOnly: true });
+
+      // 템플릿에서 열었으면 저장된 오버레이(글자/도형) 복원
+      if (st.canvasJson) {
+        try {
+          await canvas.loadFromJSON(st.canvasJson);
+        } catch {
+          /* 무시 */
+        }
+      }
       canvas.renderAll();
 
       history.current = [JSON.stringify(canvas.toJSON())];
@@ -219,6 +236,29 @@ export default function Editor() {
     a.click();
   }
 
+  async function doSaveTemplate(e: FormEvent) {
+    e.preventDefault();
+    const c = fabricRef.current;
+    if (!c || !tplName.trim()) return;
+    setSaving(true);
+    setSaveMsg("");
+    try {
+      await saveTemplate({
+        name: tplName.trim(),
+        canvas_json: c.toJSON() as Record<string, unknown>,
+        size_w: natSize.current.w,
+        size_h: natSize.current.h,
+        generation_id: st.generationId,
+      });
+      setShowSave(false);
+      setSaveMsg("보관함에 저장했어요.");
+    } catch {
+      setSaveMsg("저장에 실패했어요. 다시 시도해 주세요.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const btn =
     "flex h-12 items-center gap-1.5 rounded-xl px-3 text-base font-semibold transition disabled:opacity-40";
   const tool = `${btn} border-2 border-neutral-200 hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800`;
@@ -233,6 +273,9 @@ export default function Editor() {
           <Icon icon="ph:pencil-simple-duotone" className="text-emerald-600 text-[20px]" /> 편집기
         </div>
         <div className="flex gap-2">
+          <button onClick={() => setShowSave(true)} className={`${btn} border-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/30`}>
+            <Icon icon="ph:floppy-disk-bold" /> 보관함에 저장
+          </button>
           <button onClick={() => save("png")} className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}>
             <Icon icon="ph:download-simple-bold" /> PNG
           </button>
@@ -241,6 +284,40 @@ export default function Editor() {
           </button>
         </div>
       </header>
+
+      {saveMsg && (
+        <div className="bg-emerald-50 px-4 py-2 text-center text-base text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+          {saveMsg}
+        </div>
+      )}
+
+      {showSave && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowSave(false)}>
+          <form
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={doSaveTemplate}
+            className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl dark:bg-neutral-900"
+          >
+            <h2 className="text-xl font-bold">보관함에 저장</h2>
+            <p className="mt-1 text-base text-neutral-500 dark:text-neutral-400">이름을 정해 두면 나중에 다시 꺼내 쓸 수 있어요.</p>
+            <input
+              autoFocus
+              value={tplName}
+              onChange={(e) => setTplName(e.target.value)}
+              placeholder="예) 봄맞이 할인 배너"
+              className="mt-4 h-12 w-full rounded-xl border-2 border-neutral-200 px-4 text-lg outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-800"
+            />
+            <div className="mt-5 flex gap-2">
+              <button type="submit" disabled={saving || !tplName.trim()} className={`${btn} flex-1 justify-center bg-emerald-600 text-white hover:bg-emerald-500`}>
+                <Icon icon="ph:check-bold" /> {saving ? "저장 중..." : "저장"}
+              </button>
+              <button type="button" onClick={() => setShowSave(false)} className={`${btn} justify-center border-2 border-neutral-200 dark:border-neutral-700`}>
+                취소
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2 border-b border-neutral-200 bg-white px-4 py-2 dark:border-neutral-800 dark:bg-neutral-900">
         <button onClick={addText} className={tool}><Icon icon="ph:text-t-bold" /> 글자 넣기</button>
