@@ -193,6 +193,26 @@ export default function Editor() {
     snapshot();
   }
 
+  // 도형을 현재 색으로 꽉 채우기(깨진 AI 글자를 덮을 때 유용)
+  function fillSel() {
+    const c = fabricRef.current;
+    const obj = c?.getActiveObject() as FabricObject | undefined;
+    if (!c || !obj || obj.type === "i-text") return;
+    obj.set("fill", color);
+    c.renderAll();
+    snapshot();
+  }
+
+  // 선택한 글자 크기 조절
+  function resizeText(factor: number) {
+    const c = fabricRef.current;
+    const obj = c?.getActiveObject() as (FabricObject & { fontSize?: number }) | undefined;
+    if (!c || !obj || obj.type !== "i-text") return;
+    obj.set("fontSize", Math.max(8, Math.round((obj.fontSize || 24) * factor)));
+    c.renderAll();
+    snapshot();
+  }
+
   function removeSel() {
     const c = fabricRef.current;
     if (!c) return;
@@ -327,6 +347,9 @@ export default function Editor() {
           <Icon icon="ph:palette-bold" /> 색
           <input type="color" value={color} onChange={(e) => applyColor(e.target.value)} className="ml-1 h-7 w-8 cursor-pointer rounded border-0 bg-transparent p-0" />
         </label>
+        <button onClick={fillSel} disabled={!hasSelection} className={tool}><Icon icon="ph:paint-bucket-bold" /> 채우기</button>
+        <button onClick={() => resizeText(1.2)} disabled={!hasSelection} className={tool}><Icon icon="ph:text-aa-bold" /> 크게</button>
+        <button onClick={() => resizeText(0.85)} disabled={!hasSelection} className={tool}><Icon icon="ph:text-t-bold" /> 작게</button>
         <button onClick={removeSel} disabled={!hasSelection} className={tool}><Icon icon="ph:trash-bold" /> 삭제</button>
         <div className="mx-1 h-8 w-px bg-neutral-200 dark:bg-neutral-700" />
         <button onClick={undo} disabled={!canUndo} className={tool}><Icon icon="ph:arrow-counter-clockwise-bold" /> 되돌리기</button>
