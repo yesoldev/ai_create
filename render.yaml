@@ -1,0 +1,26 @@
+# Render 배포 설정 (Blueprint). 무료 웹서비스 1개가 백엔드+프론트를 함께 서빙.
+# 시크릿(sync:false)은 Render 대시보드에서 직접 입력한다.
+services:
+  - type: web
+    name: ai-create
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: singapore # 한국에서 가장 가까운 무료 리전
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PROJECT_ID
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: USD_KRW_RATE
+        value: "1400"

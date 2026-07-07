@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+/* 나이든 초보 사용자 기준: 큰 기본 글씨(16px+), 읽기 쉬운 시스템 폰트 */
+:root {
+  font-size: 17px;
+  font-family: "Pretendard", system-ui, "Segoe UI", "Malgun Gothic", sans-serif;
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100vh;
+}
