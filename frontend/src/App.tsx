@@ -4,7 +4,8 @@ import Login from "./pages/Login";
 import Studio from "./pages/Studio";
 import Home from "./pages/Home";
 import Admin from "./pages/Admin";
-import { Editor, Library } from "./pages/placeholders";
+import Editor from "./pages/Editor";
+import { Library } from "./pages/placeholders";
 import type { ReactNode } from "react";
 
 function Loading() {

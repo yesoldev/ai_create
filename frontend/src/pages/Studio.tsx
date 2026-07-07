@@ -178,8 +178,18 @@ export default function Studio() {
             <img src={result.image_url} alt="만든 홍보물" className="mx-auto max-h-[62vh] w-auto" />
           </div>
 
-          <div className="mt-6 grid gap-3 sm:grid-cols-2">
-            <BigButton icon="ph:download-simple-bold" onClick={() => handleDownload(result.image_url, "png")}>
+          <div className="mt-6">
+            <BigButton
+              icon="ph:pencil-simple-bold"
+              onClick={() => nav("/editor", { state: { imageUrl: result.image_url, w: effW, h: effH } })}
+            >
+              글자 넣고 꾸미기
+            </BigButton>
+          </div>
+
+          <p className="mt-6 mb-2 text-lg font-semibold">또는 바로 내려받기</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <BigButton icon="ph:download-simple-bold" tone="soft" onClick={() => handleDownload(result.image_url, "png")}>
               PNG로 내려받기
             </BigButton>
             <BigButton icon="ph:download-simple-bold" tone="ghost" onClick={() => handleDownload(result.image_url, "jpg")}>
