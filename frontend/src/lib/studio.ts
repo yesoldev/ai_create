@@ -50,7 +50,7 @@ export const BUSINESS_TYPES: BizType[] = [
   { key: "realestate", icon: "ph:buildings-duotone", label: "부동산·분양" },
   { key: "beauty", icon: "ph:scissors-duotone", label: "미용·뷰티" },
   { key: "retail", icon: "ph:shopping-bag-duotone", label: "가게·쇼핑" },
-  { key: "recruit", icon: "ph:briefcase-duotone", label: "채용·구인" },
+  { key: "nightlife", icon: "ph:martini-duotone", label: "유흥업소" },
   { key: "public", icon: "ph:megaphone-duotone", label: "행사·공공" },
   { key: "etc", icon: "ph:dots-three-circle-duotone", label: "기타" },
 ];
