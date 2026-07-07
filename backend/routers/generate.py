@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from db import get_conn
 from deps import get_current_user
-from services import cost, ledger, openai_client, storage
+from services import cost, ledger, openai_client, sizing, storage
 
 router = APIRouter(prefix="/api", tags=["generate"])
 
@@ -52,10 +52,11 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
     w = to_px(body.width, body.unit, body.dpi)
     h = to_px(body.height, body.unit, body.dpi)
 
-    # 1) 사전 한도 체크
+    # 1) 사전 한도 체크 (실제 생성 크기 기준)
+    gen_w, gen_h, _, _ = sizing.plan_size(w, h)
     with get_conn() as conn:
         remaining = ledger.remaining_krw(conn, user)
-    est = cost.estimate_cost_krw(w, h, body.quality)
+    est = cost.estimate_cost_krw(gen_w, gen_h, body.quality)
     if remaining is not None and est > remaining:
         raise HTTPException(
             status_code=402,
@@ -67,9 +68,9 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
     if body.mode == "ai_text" and body.text_content:
         prompt = f'{prompt}\n\n다음 한글 문구를 정확히 큼직하게 넣어줘: "{body.text_content}"'
 
-    # 3) 생성
+    # 3) 생성 (최소 픽셀 제약 처리 후 요청 크기로 축소)
     try:
-        png, usage = await openai_client.generate_image(prompt, w, h, body.quality)
+        png, usage, (w, h) = await openai_client.generate_image(prompt, w, h, body.quality)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"이미지 생성 실패: {e}")
 

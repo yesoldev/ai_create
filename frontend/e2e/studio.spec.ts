@@ -38,8 +38,10 @@ test("스튜디오 마법사로 배너를 만든다 (생성 모킹)", async ({ p
   await page.getByRole("button", { name: /새 홍보물 만들기/ }).click();
   await expect(page).toHaveURL(/\/studio$/);
 
-  // 1단계: 배너 선택 → 자동 2단계
+  // 1단계: 배너 선택 → 2단계 업종
   await page.getByRole("button", { name: /배너/ }).first().click();
+  await expect(page.getByRole("heading", { name: "어떤 업종인가요?" })).toBeVisible();
+  await page.getByRole("button", { name: "음식점" }).click();
   await expect(page.getByRole("heading", { name: "크기와 품질을 골라요" })).toBeVisible();
 
   // 예상비용 바(실제 estimate 호출) 노출 확인
@@ -79,6 +81,7 @@ test("직접 크기(mm) 입력이 px로 환산되어 생성된다", async ({ pag
 
   await page.getByRole("button", { name: /새 홍보물 만들기/ }).click();
   await page.getByRole("button", { name: /전단지/ }).first().click();
+  await page.getByRole("button", { name: "부동산·분양" }).click();
 
   // 직접 크기 → 100 x 200 mm, mm 단위
   await page.getByRole("button", { name: "직접 크기 정하기" }).click();

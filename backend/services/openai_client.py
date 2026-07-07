@@ -5,6 +5,7 @@ import base64
 import io
 
 from openai import AsyncOpenAI
+from PIL import Image
 
 from config import (
     IMAGE_MODEL,
@@ -13,6 +14,7 @@ from config import (
     TEXT_MODEL,
     settings,
 )
+from services.sizing import plan_size
 
 client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
@@ -44,25 +46,38 @@ def snap_size(width: int, height: int) -> tuple[int, int, bool]:
     return w, h, upscale
 
 
+def _resize_png(png: bytes, w: int, h: int) -> bytes:
+    img = Image.open(io.BytesIO(png)).convert("RGBA")
+    img = img.resize((w, h), Image.LANCZOS)
+    out = io.BytesIO()
+    img.save(out, format="PNG")
+    return out.getvalue()
+
+
 async def generate_image(
     prompt: str,
     width: int,
     height: int,
     quality: str = "medium",
     model: str | None = None,
-) -> tuple[bytes, dict]:
-    """이미지 생성. 반환: (png_bytes, usage_dict)."""
-    w, h, _ = snap_size(width, height)
+) -> tuple[bytes, dict, tuple[int, int]]:
+    """이미지 생성. 반환: (png_bytes, usage_dict, (final_w, final_h)).
+
+    gpt-image-2 최소 픽셀 제약 때문에 비율 유지한 채 생성 후 요청 크기로 축소.
+    """
+    gen_w, gen_h, fin_w, fin_h = plan_size(width, height)
     resp = await client.images.generate(
         model=model or IMAGE_MODEL,
         prompt=prompt,
-        size=f"{w}x{h}",
+        size=f"{gen_w}x{gen_h}",
         quality=quality,
         n=1,
     )
-    b64 = resp.data[0].b64_json
     usage = _usage_dict(resp)
-    return base64.b64decode(b64), usage
+    png = base64.b64decode(resp.data[0].b64_json)
+    if (gen_w, gen_h) != (fin_w, fin_h):
+        png = _resize_png(png, fin_w, fin_h)
+    return png, usage, (fin_w, fin_h)
 
 
 async def inpaint_image(

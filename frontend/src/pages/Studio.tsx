@@ -4,6 +4,9 @@ import { Icon } from "@iconify/react";
 import {
   SIZES,
   MAX_PX,
+  QUICK_STARTS,
+  BUSINESS_TYPES,
+  NEWSPAPER_HINT,
   toPx,
   fetchEstimate,
   generate,
@@ -12,6 +15,7 @@ import {
   type GenerateResult,
   type SizePreset,
   type Unit,
+  type BizType,
 } from "../lib/studio";
 
 type Kind = "banner" | "flyer";
@@ -48,12 +52,13 @@ async function downloadImage(url: string, format: "png" | "jpg") {
   URL.revokeObjectURL(a.href);
 }
 
-const STEP_LABELS = ["종류 고르기", "크기·품질", "문구 넣기", "만들기"];
+const STEP_LABELS = ["종류", "업종", "크기·품질", "문구", "만들기"];
 
 export default function Studio() {
   const nav = useNavigate();
   const [step, setStep] = useState(1);
   const [kind, setKind] = useState<Kind | null>(null);
+  const [biz, setBiz] = useState<BizType | null>(null);
   const [size, setSize] = useState<SizePreset | null>(null);
   // 직접 크기 입력
   const [custom, setCustom] = useState(false);
@@ -86,10 +91,11 @@ export default function Studio() {
 
   const canNext = useMemo(() => {
     if (step === 1) return !!kind;
-    if (step === 2) return custom ? cw > 0 && ch > 0 : !!size;
-    if (step === 3) return description.trim().length > 0;
+    if (step === 2) return !!biz;
+    if (step === 3) return custom ? cw > 0 && ch > 0 : !!size;
+    if (step === 4) return description.trim().length > 0;
     return true;
-  }, [step, kind, size, custom, cw, ch, description]);
+  }, [step, kind, biz, size, custom, cw, ch, description]);
 
   function pickKind(k: Kind) {
     setKind(k);
@@ -98,13 +104,19 @@ export default function Studio() {
     setStep(2);
   }
 
+  function pickBiz(b: BizType) {
+    setBiz(b);
+    setStep(3);
+  }
+
   async function onGenerate() {
     if (!effW || !effH) return;
     setBusy(true);
     setError("");
     try {
+      const fullPrompt = `${biz ? `[업종: ${biz.label}] ` : ""}${description}. ${NEWSPAPER_HINT}`;
       const r = await generate({
-        prompt: description,
+        prompt: fullPrompt,
         width: effW,
         height: effH,
         quality,
@@ -128,6 +140,7 @@ export default function Studio() {
     setResult(null);
     setStep(1);
     setKind(null);
+    setBiz(null);
     setSize(null);
     setDescription("");
     setTextContent("");
@@ -231,7 +244,24 @@ export default function Studio() {
           </Section>
         )}
 
-        {step === 2 && kind && (
+        {step === 2 && (
+          <Section title="어떤 업종인가요?" desc="신문에 실릴 광고예요. 업종을 하나 골라 주세요.">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {BUSINESS_TYPES.map((b) => (
+                <ChoiceCard
+                  key={b.key}
+                  active={biz?.key === b.key}
+                  icon={b.icon}
+                  title={b.label}
+                  desc=""
+                  onClick={() => pickBiz(b)}
+                />
+              ))}
+            </div>
+          </Section>
+        )}
+
+        {step === 3 && kind && (
           <Section title="크기와 품질을 골라요" desc="잘 모르면 추천된 것을 그대로 두세요.">
             <p className="mb-2 text-lg font-semibold">크기</p>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -326,8 +356,22 @@ export default function Studio() {
           </Section>
         )}
 
-        {step === 3 && (
+        {step === 4 && (
           <Section title="어떤 그림을 원하세요?" desc="쉽게 설명만 적어 주세요.">
+            <p className="mb-2 text-lg font-semibold">빠른 시작 <span className="font-normal text-neutral-400">(눌러서 채우고 고쳐 쓰세요)</span></p>
+            <div className="mb-6 flex flex-wrap gap-2">
+              {QUICK_STARTS.map((q) => (
+                <button
+                  key={q.key}
+                  type="button"
+                  onClick={() => setDescription(q.description)}
+                  className="flex h-11 items-center gap-2 rounded-full border-2 border-neutral-200 px-4 text-base font-semibold hover:border-emerald-400 hover:bg-emerald-50 dark:border-neutral-700 dark:hover:bg-emerald-950/30"
+                >
+                  <Icon icon={q.icon} className="text-[20px] text-emerald-600" />
+                  {q.label}
+                </button>
+              ))}
+            </div>
             <label htmlFor="desc" className="mb-2 block text-lg font-semibold">
               만들고 싶은 그림 설명
             </label>
@@ -352,10 +396,11 @@ export default function Studio() {
           </Section>
         )}
 
-        {step === 4 && (size || custom) && (
+        {step === 5 && (size || custom) && (
           <Section title="이대로 만들까요?" desc="확인하고 만들기를 눌러 주세요.">
             <dl className="divide-y divide-neutral-200 rounded-2xl border-2 border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
               <SummaryRow label="종류" value={kind === "banner" ? "배너" : "전단지"} />
+              <SummaryRow label="업종" value={biz?.label ?? "-"} />
               <SummaryRow
                 label="크기"
                 value={custom ? `직접 (${effW}×${effH})` : `${size!.label} (${size!.w}×${size!.h})`}
@@ -384,7 +429,7 @@ export default function Studio() {
             {step === 1 ? "처음으로" : "이전"}
           </button>
 
-          {step < 4 ? (
+          {step < 5 ? (
             <BigButton icon="ph:arrow-right-bold" iconRight disabled={!canNext} onClick={() => setStep((s) => s + 1)}>
               다음
             </BigButton>
@@ -487,7 +532,7 @@ function ChoiceCard({
       </span>
       <span>
         <span className="block text-xl font-bold">{title}</span>
-        <span className="block text-base text-neutral-500 dark:text-neutral-400">{desc}</span>
+        {desc && <span className="block text-base text-neutral-500 dark:text-neutral-400">{desc}</span>}
       </span>
     </button>
   );
