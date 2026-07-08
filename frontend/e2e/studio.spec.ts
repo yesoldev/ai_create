@@ -55,7 +55,7 @@ test("스튜디오 마법사로 배너를 만든다 (생성 모킹)", async ({ p
   await expect(page.getByRole("heading", { name: "어떤 그림을 원하세요?" })).toBeVisible();
   await page.getByLabel("만들고 싶은 그림 설명").fill("봄맞이 할인 배너, 밝은 분홍 배경");
   await page.route("**/api/copywrite", (r) =>
-    r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ candidates: ["봄맞이 30% 할인", "따뜻한 밥상"] }) }),
+    r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ candidates: ["봄맞이 30% 할인", "따뜻한 밥상"], cost_krw: 1, remaining_krw: null }) }),
   );
   await page.getByRole("button", { name: /문구 추천받기/ }).click();
   await page.getByRole("button", { name: "봄맞이 30% 할인" }).click();

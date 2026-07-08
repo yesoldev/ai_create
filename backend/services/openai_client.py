@@ -138,8 +138,8 @@ async def inpaint_image(
     return base64.b64decode(b64), usage
 
 
-async def copywrite(business: str, event: str, tone: str = "밝고 친근하게") -> list[str]:
-    """업종/이벤트/톤 → 홍보 문구 후보 3~5개."""
+async def copywrite(business: str, event: str, tone: str = "밝고 친근하게") -> tuple[list[str], dict]:
+    """업종/이벤트/톤 → 홍보 문구 후보 3~5개. 반환: (후보목록, usage_dict)."""
     resp = await client.chat.completions.create(
         model=TEXT_MODEL,
         messages=[
@@ -157,4 +157,5 @@ async def copywrite(business: str, event: str, tone: str = "밝고 친근하게"
         temperature=0.9,
     )
     text = resp.choices[0].message.content or ""
-    return [ln.strip(" -•\t") for ln in text.splitlines() if ln.strip()][:5]
+    candidates = [ln.strip(" -•\t") for ln in text.splitlines() if ln.strip()][:5]
+    return candidates, _usage_dict(resp)

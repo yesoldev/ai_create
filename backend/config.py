@@ -65,6 +65,11 @@ PRICE_IMAGE_OUTPUT_PER_MTOK = 30.0
 PRICE_IMAGE_INPUT_PER_MTOK = 8.0
 PRICE_TEXT_INPUT_PER_MTOK = 5.0
 
+# 카피라이팅 텍스트 모델(gpt-4.1-mini) 단가 (2026-07 기준, OpenAI)
+#   입력 $0.40 / 1M tokens, 출력 $1.60 / 1M tokens
+PRICE_CHAT_INPUT_PER_MTOK = 0.40
+PRICE_CHAT_OUTPUT_PER_MTOK = 1.60
+
 # 기본 모델
 IMAGE_MODEL = "gpt-image-2"
 IMAGE_MODEL_CHEAP = "gpt-image-1-mini"

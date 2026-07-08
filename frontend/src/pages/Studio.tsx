@@ -95,10 +95,17 @@ export default function Studio() {
       .catch(() => setFolders([]));
   }, []);
 
+  const [copyMsg, setCopyMsg] = useState("");
   async function suggestCopy() {
     setCopyBusy(true);
+    setCopyMsg("");
     try {
-      setCopyIdeas(await copywrite(biz?.label || "가게", description || "홍보"));
+      const r = await copywrite(biz?.label || "가게", description || "홍보");
+      setCopyIdeas(r.candidates);
+      setCopyMsg(
+        `문구 추천에 ${krw(r.cost_krw)} 썼어요` +
+          (r.remaining_krw === null ? " (잔액 무제한)." : ` · 이번 달 남은 금액 ${krw(r.remaining_krw)}.`),
+      );
     } catch {
       setCopyIdeas([]);
     } finally {
@@ -121,13 +128,15 @@ export default function Studio() {
     return () => clearInterval(t);
   }, [busy]);
 
-  // 생성 결과가 나오면 제목/폴더 저장 상태 초기화(자동 이름을 기본값으로)
+  // 생성 결과가 나오면 제목/폴더 저장 상태 초기화
+  //  (사용자가 만들기 단계에서 입력한 제목 우선 → 없으면 서버가 지은 이름)
   useEffect(() => {
     if (result) {
-      setProjName(result.project_name || "새 홍보물");
+      setProjName(title.trim() || result.project_name || "새 홍보물");
       setProjFolderId("");
       setProjSaved(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result]);
 
   // 실제 생성 크기(px): 직접 입력이면 환산+상한, 아니면 프리셋
@@ -761,6 +770,11 @@ export default function Studio() {
                 <p className="mb-2 text-base text-neutral-500 dark:text-neutral-400">
                   광고는 글자가 적어야 눈에 잘 들어와요. 꼭 필요한 짧은 문구만 적어 주세요.
                 </p>
+                {copyMsg && (
+                  <p className="mb-2 flex items-center gap-1.5 text-sm text-emerald-700 dark:text-emerald-300">
+                    <Icon icon="ph:coins-duotone" className="text-[16px]" /> {copyMsg}
+                  </p>
+                )}
                 {copyIdeas.length > 0 && (
                   <div className="mb-3 flex flex-wrap gap-2">
                     {copyIdeas.map((idea, i) => (

@@ -65,6 +65,17 @@ export default function Home() {
     }
   }
 
+  // 한 프로젝트의 여러 페이지가 각각 카드로 나오지 않도록 프로젝트(template_id)별 최신 1개만
+  const recentUnique = (() => {
+    const seen = new Set<string>();
+    return gens.filter((g) => {
+      if (!g.template_id) return true;
+      if (seen.has(g.template_id)) return false;
+      seen.add(g.template_id);
+      return true;
+    });
+  })();
+
   const pct =
     usage && usage.monthly_limit_krw
       ? Math.min(100, Math.round((usage.used_krw / usage.monthly_limit_krw) * 100))
@@ -156,7 +167,7 @@ export default function Home() {
           title="최근 만든 것"
           icon="ph:clock-counter-clockwise-duotone"
           empty="아직 만든 홍보물이 없어요."
-          items={gens.map((g) => ({
+          items={recentUnique.map((g) => ({
             id: g.id,
             name: g.prompt?.slice(0, 16) || "홍보물",
             sub: g.size,

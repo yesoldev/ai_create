@@ -136,10 +136,15 @@ export interface GeneratePayload {
   similarity?: number; // 1~4
 }
 
-// AI 문구 추천 (업종/행사 → 후보 3~5개)
-export async function copywrite(business: string, event: string, tone = "밝고 친근하게"): Promise<string[]> {
-  const { data } = await api.post<{ candidates: string[] }>("/api/copywrite", { business, event, tone });
-  return data.candidates;
+// AI 문구 추천 (업종/행사 → 후보 3~5개 + 비용/잔액)
+export interface CopyResult {
+  candidates: string[];
+  cost_krw: number;
+  remaining_krw: number | null;
+}
+export async function copywrite(business: string, event: string, tone = "밝고 친근하게"): Promise<CopyResult> {
+  const { data } = await api.post<CopyResult>("/api/copywrite", { business, event, tone });
+  return data;
 }
 
 // 참고용 사진 업로드 → ref_upload_id 반환

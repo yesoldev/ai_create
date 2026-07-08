@@ -144,6 +144,13 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
         if existing:
             project_id = existing["id"]
             project_name = existing["name"] or project_name
+            # 구 데이터(페이지 행 없음) 안전 백필: 기존 대표 이미지를 0페이지로
+            conn.execute(
+                "insert into public.template_pages (template_id, sort_order, bg_image_path, thumb_path, canvas_json) "
+                "select id, 0, bg_image_path, thumb_path, canvas_json from public.templates "
+                "where id=%s and not exists (select 1 from public.template_pages p where p.template_id=%s)",
+                (project_id, project_id),
+            )
             nxt = conn.execute(
                 "select coalesce(max(sort_order), -1) + 1 as n from public.template_pages where template_id=%s",
                 (project_id,),
@@ -253,8 +260,13 @@ class CopyBody(BaseModel):
 
 @router.post("/copywrite")
 async def copywrite(body: CopyBody, user: dict = Depends(get_current_user)):
-    candidates = await openai_client.copywrite(body.business, body.event, body.tone)
-    return {"candidates": candidates}
+    candidates, usage = await openai_client.copywrite(body.business, body.event, body.tone)
+    cost_krw = cost.copy_cost_krw(usage)
+    with get_conn() as conn:
+        if cost_krw > 0:
+            ledger.add_usage(conn, user["id"], cost_krw)
+        remaining_after = ledger.remaining_krw(conn, user)
+    return {"candidates": candidates, "cost_krw": cost_krw, "remaining_krw": remaining_after}
 
 
 @router.get("/generations")

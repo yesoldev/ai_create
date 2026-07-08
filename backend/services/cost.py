@@ -9,6 +9,8 @@ import math
 
 from config import (
     ESTIMATE_USD_1024,
+    PRICE_CHAT_INPUT_PER_MTOK,
+    PRICE_CHAT_OUTPUT_PER_MTOK,
     PRICE_IMAGE_INPUT_PER_MTOK,
     PRICE_IMAGE_OUTPUT_PER_MTOK,
     PRICE_TEXT_INPUT_PER_MTOK,
@@ -46,6 +48,16 @@ def actual_cost_krw(usage: dict | None) -> float:
         + img_tok * PRICE_IMAGE_INPUT_PER_MTOK
         + text_tok * PRICE_TEXT_INPUT_PER_MTOK
     ) / 1_000_000
+    return round(usd * settings.USD_KRW_RATE, 2)
+
+
+def copy_cost_krw(usage: dict | None) -> float:
+    """카피라이팅(chat) 응답 usage 토큰으로 실제 비용(KRW) 계산."""
+    if not usage:
+        return 0.0
+    pt = usage.get("prompt_tokens", 0) or 0
+    ct = usage.get("completion_tokens", 0) or 0
+    usd = (pt * PRICE_CHAT_INPUT_PER_MTOK + ct * PRICE_CHAT_OUTPUT_PER_MTOK) / 1_000_000
     return round(usd * settings.USD_KRW_RATE, 2)
 
 
