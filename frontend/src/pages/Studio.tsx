@@ -6,6 +6,7 @@ import {
   MAX_PX,
   QUICK_STARTS,
   BUSINESS_TYPES,
+  COLORS,
   NEWSPAPER_HINT,
   toPx,
   fetchEstimate,
@@ -22,7 +23,11 @@ import {
   type Unit,
   type BizType,
   type RecentGen,
+  type ColorChoice,
 } from "../lib/studio";
+import { listFolders, createFolder, withDepth, type Folder } from "../lib/folders";
+import { updateTemplate } from "../lib/library";
+import { InputDialog } from "../components/dialogs";
 
 type Kind = "banner" | "flyer";
 const QUALITIES = [
@@ -58,6 +63,7 @@ export default function Studio() {
   const [description, setDescription] = useState("");
   const [bizName, setBizName] = useState(""); // 업체명 — 그림에 크게 넣을 주 문구
   const [textContent, setTextContent] = useState("");
+  const [color, setColor] = useState<ColorChoice | null>(null); // 배경 색상 선택
   const [refGen, setRefGen] = useState<RecentGen | null>(null); // 참고할 최근 생성 이미지
   const [copyIdeas, setCopyIdeas] = useState<string[]>([]);
   const [copyBusy, setCopyBusy] = useState(false);
@@ -67,10 +73,23 @@ export default function Studio() {
   const [showRefPicker, setShowRefPicker] = useState(false);
   const [showRecentPrompts, setShowRecentPrompts] = useState(false);
 
+  // 결과 화면: 제목·폴더 저장 + '비슷하게 다시 만들기' 보완 프롬프트
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [projName, setProjName] = useState("");
+  const [projFolderId, setProjFolderId] = useState("");
+  const [projSaving, setProjSaving] = useState(false);
+  const [projSaved, setProjSaved] = useState(false);
+  const [newFolderOpen, setNewFolderOpen] = useState(false);
+  const [regenOpen, setRegenOpen] = useState(false);
+  const [regenText, setRegenText] = useState("");
+
   useEffect(() => {
     listGenerations()
       .then(setRecentGens)
       .catch(() => setRecentGens([]));
+    listFolders()
+      .then(setFolders)
+      .catch(() => setFolders([]));
   }, []);
 
   async function suggestCopy() {
@@ -98,6 +117,15 @@ export default function Studio() {
     }, 3500);
     return () => clearInterval(t);
   }, [busy]);
+
+  // 생성 결과가 나오면 제목/폴더 저장 상태 초기화(자동 이름을 기본값으로)
+  useEffect(() => {
+    if (result) {
+      setProjName(result.project_name || "새 홍보물");
+      setProjFolderId("");
+      setProjSaved(false);
+    }
+  }, [result]);
 
   // 실제 생성 크기(px): 직접 입력이면 환산+상한, 아니면 프리셋
   const effW = custom ? Math.min(toPx(cw, unit), MAX_PX) : size?.w ?? 0;
@@ -139,7 +167,7 @@ export default function Studio() {
     setStep(3);
   }
 
-  async function onGenerate(refGenerationId?: string) {
+  async function onGenerate(refGenerationId?: string, extraPrompt?: string) {
     if (!effW || !effH) return;
     setBusy(true);
     setError("");
@@ -149,7 +177,9 @@ export default function Studio() {
       const hasRef = !!refId;
       // 그림에 넣을 글자 = 업체명(주) + 추가 문구. 없으면 undefined → 글자 최소화 생성
       const wantedText = [bizName.trim(), textContent.trim()].filter(Boolean).join("\n");
-      const fullPrompt = `${bizLabel ? `[업종: ${bizLabel}] ` : ""}${description}. ${NEWSPAPER_HINT}`;
+      const colorHint = color ? ` 주요 배경과 색은 ${color.name} 계열로 밝고 선명하게.` : "";
+      const extra = extraPrompt?.trim() ? ` ${extraPrompt.trim()}.` : "";
+      const fullPrompt = `${bizLabel ? `[업종: ${bizLabel}] ` : ""}${description}.${extra}${colorHint} ${NEWSPAPER_HINT}`;
       pushRecentPrompt(description); // 다음에 재사용할 수 있게 저장
       const r = await generate({
         prompt: fullPrompt,
@@ -184,6 +214,7 @@ export default function Studio() {
     setDescription("");
     setBizName("");
     setTextContent("");
+    setColor(null);
     setRefGen(null);
     setCopyIdeas([]);
   }
@@ -193,6 +224,48 @@ export default function Studio() {
     const hasProgress = !!kind || description.trim() || bizName.trim() || textContent.trim();
     if (hasProgress && !window.confirm("지금 나가면 입력한 내용이 사라져요. 나갈까요?")) return;
     nav("/");
+  }
+
+  // 결과 프로젝트의 제목·폴더 저장
+  async function saveProject() {
+    if (!result || !projName.trim()) return;
+    setProjSaving(true);
+    try {
+      await updateTemplate(result.project_id, {
+        name: projName.trim(),
+        folder_id: projFolderId || null,
+        move_to_root: !projFolderId,
+      });
+      setProjSaved(true);
+    } catch {
+      /* 저장 실패 시 조용히 무시 — 최근 만든 것에는 이미 남아 있음 */
+    } finally {
+      setProjSaving(false);
+    }
+  }
+
+  async function addFolder(name: string) {
+    try {
+      const f = await createFolder(name);
+      setFolders((prev) => [...prev, f]);
+      setProjFolderId(f.id);
+    } catch {
+      /* 무시 */
+    } finally {
+      setNewFolderOpen(false);
+    }
+  }
+
+  // "비슷하게 다시 만들기" — 보완 프롬프트 입력 후 진행
+  function startRegen() {
+    setRegenText("");
+    setRegenOpen(true);
+  }
+  function confirmRegen() {
+    if (!result) return;
+    const extra = regenText;
+    setRegenOpen(false);
+    onGenerate(result.generation_id, extra);
   }
 
   async function handleDownload(url: string, format: "png" | "jpg") {
@@ -237,9 +310,68 @@ export default function Studio() {
             >
               글자 넣고 꾸미기
             </BigButton>
-            <BigButton icon="ph:arrows-clockwise-bold" tone="soft" onClick={() => onGenerate(result.generation_id)}>
+            <BigButton icon="ph:arrows-clockwise-bold" tone="soft" onClick={startRegen}>
               비슷하게 다시 만들기
             </BigButton>
+          </div>
+
+          {/* 저장 위치: 제목 + 폴더 (자동 생성된 프로젝트를 정리) */}
+          <div className="mt-6 rounded-3xl border-2 border-neutral-200 p-5 dark:border-neutral-800">
+            <p className="flex items-center gap-2 text-lg font-semibold">
+              <Icon icon="ph:folder-open-duotone" className="text-emerald-600 text-[24px]" />
+              보관함에 저장하기
+            </p>
+            <p className="mt-1 text-base text-neutral-500 dark:text-neutral-400">
+              제목을 정하고 폴더를 골라 두면 나중에 쉽게 찾을 수 있어요.
+            </p>
+            <label htmlFor="projname" className="mt-4 mb-1 block text-base font-semibold">제목</label>
+            <input
+              id="projname"
+              value={projName}
+              onChange={(e) => {
+                setProjName(e.target.value);
+                setProjSaved(false);
+              }}
+              placeholder="예) 봄맞이 할인 배너"
+              className="h-14 w-full rounded-2xl border-2 border-neutral-200 bg-neutral-50 px-4 text-lg outline-none focus:border-emerald-500 dark:border-neutral-800 dark:bg-neutral-900"
+            />
+            <label htmlFor="projfolder" className="mt-4 mb-1 block text-base font-semibold">폴더</label>
+            <div className="flex flex-wrap gap-2">
+              <select
+                id="projfolder"
+                value={projFolderId}
+                onChange={(e) => {
+                  setProjFolderId(e.target.value);
+                  setProjSaved(false);
+                }}
+                className="h-14 flex-1 rounded-2xl border-2 border-neutral-200 bg-neutral-50 px-3 text-lg outline-none focus:border-emerald-500 dark:border-neutral-800 dark:bg-neutral-900"
+              >
+                <option value="">폴더 없음</option>
+                {withDepth(folders).map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {" ".repeat(f.depth * 2)}
+                    {f.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => setNewFolderOpen(true)}
+                className="flex h-14 items-center gap-1.5 rounded-2xl border-2 border-neutral-200 px-4 text-base font-semibold text-neutral-600 hover:border-emerald-400 hover:bg-emerald-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-emerald-950/30"
+              >
+                <Icon icon="ph:folder-plus-duotone" className="text-emerald-600 text-[20px]" /> 새 폴더
+              </button>
+            </div>
+            <div className="mt-4 flex items-center gap-3">
+              <BigButton icon={projSaved ? "ph:check-bold" : "ph:floppy-disk-bold"} tone={projSaved ? "soft" : "primary"} disabled={projSaving || !projName.trim()} onClick={saveProject}>
+                {projSaving ? "저장 중..." : projSaved ? "저장됨" : "이 위치에 저장"}
+              </BigButton>
+              {projSaved && (
+                <span className="flex items-center gap-1 text-base text-emerald-700 dark:text-emerald-300">
+                  <Icon icon="ph:check-circle-fill" /> 보관함에 저장했어요
+                </span>
+              )}
+            </div>
           </div>
 
           <p className="mt-6 mb-2 text-lg font-semibold">또는 바로 내려받기</p>
@@ -264,6 +396,43 @@ export default function Studio() {
             </BigButton>
           </div>
         </div>
+
+        {/* 비슷하게 다시 만들기 — 보완 프롬프트 입력 (#2) */}
+        {regenOpen && (
+          <PickerModal
+            title="어떻게 바꿀까요?"
+            desc="이번 그림과 비슷하게 다시 만들어요. 바꾸고 싶은 점을 적으면 반영해요. (비워 두면 그대로 비슷하게)"
+            icon="ph:arrows-clockwise-duotone"
+            onClose={() => setRegenOpen(false)}
+          >
+            <textarea
+              autoFocus
+              value={regenText}
+              onChange={(e) => setRegenText(e.target.value)}
+              rows={3}
+              placeholder="예) 배경을 더 밝게, 글자를 더 크게"
+              className="w-full rounded-2xl border-2 border-neutral-200 bg-neutral-50 p-4 text-lg outline-none focus:border-emerald-500 dark:border-neutral-800 dark:bg-neutral-900"
+            />
+            <div className="mt-4 flex gap-2">
+              <BigButton icon="ph:magic-wand-bold" onClick={confirmRegen}>
+                다시 만들기
+              </BigButton>
+              <BigButton icon="ph:x-bold" tone="ghost" onClick={() => setRegenOpen(false)}>
+                취소
+              </BigButton>
+            </div>
+          </PickerModal>
+        )}
+
+        <InputDialog
+          open={newFolderOpen}
+          icon="ph:folder-plus-duotone"
+          title="새 폴더 만들기"
+          placeholder="예) 봄 행사"
+          confirmLabel="만들기"
+          onConfirm={addFolder}
+          onClose={() => setNewFolderOpen(false)}
+        />
       </Shell>
     );
   }
@@ -486,6 +655,42 @@ export default function Studio() {
               className="w-full rounded-2xl border-2 border-neutral-200 bg-neutral-50 p-4 text-lg outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15 dark:border-neutral-800 dark:bg-neutral-900"
             />
 
+            <p className="mb-2 mt-6 text-lg font-semibold">
+              바탕 색 <span className="font-normal text-neutral-400">(선택 · 누르면 그 색으로 만들어요)</span>
+            </p>
+            <div className="flex flex-wrap gap-2.5">
+              {COLORS.map((c) => {
+                const active = color?.name === c.name;
+                return (
+                  <button
+                    key={c.name}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setColor(active ? null : c)}
+                    title={c.name}
+                    className={`flex h-12 items-center gap-2 rounded-2xl border-2 pl-2 pr-3 text-base font-semibold transition ${
+                      active
+                        ? "border-emerald-500 bg-emerald-50 ring-4 ring-emerald-500/15 dark:bg-emerald-950/30"
+                        : "border-neutral-200 hover:border-emerald-300 dark:border-neutral-700"
+                    }`}
+                  >
+                    <span
+                      className="grid h-8 w-8 place-items-center rounded-xl border border-black/10"
+                      style={{ backgroundColor: c.hex }}
+                    >
+                      {active && (
+                        <Icon
+                          icon="ph:check-bold"
+                          className={c.name === "흰색" || c.name === "노랑" ? "text-neutral-800" : "text-white"}
+                        />
+                      )}
+                    </span>
+                    {c.name}
+                  </button>
+                );
+              })}
+            </div>
+
             <label htmlFor="bizname" className="mb-2 mt-6 block text-lg font-semibold">
               업체명 <span className="font-normal text-neutral-400">(그림에 크게 넣을 이름)</span>
             </label>
@@ -575,6 +780,7 @@ export default function Studio() {
               />
               <SummaryRow label="품질" value={QUALITIES.find((q) => q.key === quality)?.label ?? quality} />
               <SummaryRow label="설명" value={description} />
+              {color && <SummaryRow label="바탕 색" value={color.name} />}
               {bizName.trim() && <SummaryRow label="업체명" value={bizName} />}
               {textContent.trim() && <SummaryRow label="넣을 글자" value={textContent} />}
               {refGen && <SummaryRow label="참고 이미지" value="최근 만든 것과 비슷하게" />}

@@ -56,6 +56,26 @@ export const BUSINESS_TYPES: BizType[] = [
   { key: "etc", icon: "ph:dots-three-circle-duotone", label: "기타" },
 ];
 
+// 배경 색상 12종 — 고르면 프롬프트에 색을 주입(모델이 그 색 위주로 생성)
+export interface ColorChoice {
+  name: string;
+  hex: string;
+}
+export const COLORS: ColorChoice[] = [
+  { name: "빨강", hex: "#ef4444" },
+  { name: "주황", hex: "#f97316" },
+  { name: "노랑", hex: "#f5c518" },
+  { name: "초록", hex: "#22c55e" },
+  { name: "청록", hex: "#14b8a6" },
+  { name: "하늘", hex: "#38bdf8" },
+  { name: "파랑", hex: "#3b82f6" },
+  { name: "남색", hex: "#1e40af" },
+  { name: "보라", hex: "#8b5cf6" },
+  { name: "분홍", hex: "#ec4899" },
+  { name: "검정", hex: "#111827" },
+  { name: "흰색", hex: "#f8fafc" },
+];
+
 // 인쇄용 광고 맥락 — 프롬프트에 항상 덧붙임.
 // ⚠ "신문 지면" 이라는 단어는 모델이 '누런 신문지·세피아 종이색'으로 해석해
 //   전체를 갈색 톤으로 물들이므로 절대 넣지 않는다.
@@ -83,6 +103,7 @@ export async function fetchEstimate(w: number, h: number, quality: string): Prom
 export interface GenerateResult {
   generation_id: string;
   project_id: string;
+  project_name: string;
   image_url: string;
   thumb_url: string;
   size: string;

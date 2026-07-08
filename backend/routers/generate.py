@@ -160,6 +160,7 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
     return {
         "generation_id": gid,
         "project_id": project_id,
+        "project_name": project_name,
         "image_url": image_url,
         "thumb_url": storage.public_url("thumbs", thumb_path),
         "size": f"{w}x{h}",
