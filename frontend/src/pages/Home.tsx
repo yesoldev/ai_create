@@ -48,6 +48,7 @@ export default function Home() {
           canvasJson: t.canvas_json || undefined,
           templateName: t.name,
           templateId: t.id,
+          pages: t.pages,
         },
       });
     } finally {

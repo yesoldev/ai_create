@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, useCallback, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "@iconify/react";
-import { Canvas, IText, Rect, Circle, type FabricObject } from "fabric";
-import { saveTemplate, updateTemplate } from "../lib/library";
+import { Canvas, StaticCanvas, IText, Rect, Circle, type FabricObject } from "fabric";
+import JSZip from "jszip";
+import { saveTemplate, updateTemplate, savePages, deletePage, type TemplatePage } from "../lib/library";
 import { listFolders, withDepth, type Folder } from "../lib/folders";
 import { generate, uploadRef, krw } from "../lib/studio";
 import { ConfirmDialog } from "../components/dialogs";
@@ -17,12 +18,32 @@ interface EditorState {
   templateName?: string;
   quality?: string;
   kind?: "banner" | "flyer";
+  pages?: TemplatePage[];
 }
+
+// 편집기 내부 페이지 표현
+interface PageItem {
+  id: string | null;
+  bgUrl?: string;
+  canvasJson: Record<string, unknown> | null;
+}
+
+type Fmt = "png" | "jpg";
 
 function today(): string {
   const d = new Date();
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`;
+}
+
+function loadImg(url: string): Promise<HTMLImageElement> {
+  return new Promise((res, rej) => {
+    const el = new Image();
+    el.crossOrigin = "anonymous";
+    el.onload = () => res(el);
+    el.onerror = () => rej(new Error("img"));
+    el.src = url;
+  });
 }
 
 // AI 글자 수정 중 표시할 상태(순환)
@@ -40,15 +61,25 @@ export default function Editor() {
 
   const canvasEl = useRef<HTMLCanvasElement>(null);
   const fabricRef = useRef<Canvas | null>(null);
-  const bgImgRef = useRef<HTMLImageElement | null>(null); // 원본 이미지(합성용)
-  const genIdRef = useRef<string | undefined>(st.generationId); // AI 수정 시 참고할 최신 생성 id
+  const bgImgRef = useRef<HTMLImageElement | null>(null); // 현재 페이지 원본(합성용)
   const natSize = useRef({ w: 1024, h: 1024 });
   const history = useRef<string[]>([]);
   const histIndex = useRef(-1);
   const restoring = useRef(false);
 
+  // 페이지들 — pagesRef가 실제 데이터(오버레이 포함), pages는 렌더용 미러
+  const initialPages: PageItem[] =
+    st.pages && st.pages.length
+      ? st.pages.map((p) => ({ id: p.id, bgUrl: p.bg_url ?? undefined, canvasJson: p.canvas_json }))
+      : [{ id: null, bgUrl: st.imageUrl, canvasJson: st.canvasJson ?? null }];
+  const pagesRef = useRef<PageItem[]>(initialPages);
+  const activeRef = useRef(0);
+  const [pages, setPages] = useState<PageItem[]>(initialPages);
+  const [active, setActive] = useState(0);
+
   const [ready, setReady] = useState(false);
   const [disp, setDisp] = useState({ w: 0, h: 0 });
+  const [bgUrl, setBgUrl] = useState<string | undefined>(initialPages[0].bgUrl);
   const [hasSelection, setHasSelection] = useState(false);
   const [color, setColor] = useState("#111111");
   const [canUndo, setCanUndo] = useState(false);
@@ -62,7 +93,6 @@ export default function Editor() {
   const [dirty, setDirty] = useState(false);
   const [leaveOpen, setLeaveOpen] = useState(false);
   // AI로 글자 수정/추가
-  const [bgUrl, setBgUrl] = useState<string | undefined>(st.imageUrl);
   const [aiOpen, setAiOpen] = useState(false);
   const [aiText, setAiText] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
@@ -80,68 +110,6 @@ export default function Editor() {
     const t = setInterval(() => setAiStep((s) => Math.min(s + 1, AI_STEPS.length - 1)), 3500);
     return () => clearInterval(t);
   }, [aiBusy]);
-
-  // AI로 이미지의 글자를 수정/추가 — 현재 이미지를 참고해 다시 생성하고 배경을 교체
-  async function runAiEdit() {
-    if (!aiText.trim() || aiBusy) return;
-    setAiBusy(true);
-    setAiMsg("");
-    try {
-      const { w, h } = natSize.current;
-      // 참고 이미지: 생성물 id가 있으면 그대로, 없으면(프로젝트로 연 경우) 현재 이미지를 업로드해 참고
-      let refGenerationId = genIdRef.current;
-      let refUploadId: string | undefined;
-      if (!refGenerationId && bgUrl) {
-        try {
-          const blob = await (await fetch(bgUrl)).blob();
-          refUploadId = await uploadRef(new File([blob], "ref.png", { type: blob.type || "image/png" }));
-        } catch {
-          refGenerationId = undefined; // 참고 없이 진행
-        }
-      }
-      // 입력을 '넣을 글자'가 아니라 '수정 지시'로 전달(text_content 미사용 → 그대로 박히지 않음)
-      const r = await generate({
-        prompt:
-          "참고 이미지의 디자인·구도·색·배치와 나머지 글자는 그대로 두고, 아래 요청만 반영해줘. " +
-          "요청은 그림에 그대로 적는 글자가 아니라 '무엇을 어떻게 바꾸거나 더할지'에 대한 지시다. " +
-          `요청: "${aiText.trim()}". ` +
-          "요청에 없는 글자는 절대 바꾸지 말고, 화살표(→)나 지시문 자체를 그림에 쓰지 마. 없는 정보는 지어내지 마.",
-        width: w,
-        height: h,
-        quality: st.quality || "medium",
-        mode: "ai_text",
-        kind: st.kind,
-        ref_generation_id: refGenerationId,
-        ref_upload_id: refUploadId,
-        template_id: st.templateId,
-        similarity: 4,
-      });
-      // 새 이미지를 배경으로 교체(원본 해상도 합성용 이미지도 갱신)
-      const el = new Image();
-      el.crossOrigin = "anonymous";
-      await new Promise<void>((res, rej) => {
-        el.onload = () => res();
-        el.onerror = () => rej(new Error("img"));
-        el.src = r.image_url;
-      });
-      bgImgRef.current = el;
-      genIdRef.current = r.generation_id;
-      setBgUrl(r.image_url);
-      setDirty(true);
-      setAiOpen(false);
-      setAiText("");
-      setAiMsg(`AI가 글자를 수정했어요. 이번에 ${krw(r.cost_krw)} 썼어요.`);
-    } catch (e: unknown) {
-      const status = (e as { response?: { status?: number } })?.response?.status;
-      setAiMsg(
-        status === 402
-          ? "이번 달 사용할 수 있는 금액을 넘었어요. 관리자에게 문의하세요."
-          : "AI 수정에 실패했어요. 잠시 후 다시 시도해 주세요.",
-      );
-    } finally {
-      setAiBusy(false);
-    }
-  }
 
   const snapshot = useCallback(() => {
     if (!fabricRef.current || restoring.current) return;
@@ -165,9 +133,66 @@ export default function Editor() {
     setCanRedo(histIndex.current < history.current.length - 1);
   }, []);
 
+  // 지정 페이지를 캔버스에 표시(이전 페이지 오버레이는 pagesRef에 저장)
+  const showPage = useCallback(async (idx: number, saveCurrent = true) => {
+    const c = fabricRef.current;
+    if (!c || idx < 0 || idx >= pagesRef.current.length) return;
+    if (saveCurrent && pagesRef.current[activeRef.current]) {
+      pagesRef.current[activeRef.current].canvasJson = c.toJSON() as Record<string, unknown>;
+    }
+    activeRef.current = idx;
+    setActive(idx);
+    setReady(false);
+    restoring.current = true;
+
+    const page = pagesRef.current[idx];
+    let natW = natSize.current.w;
+    let natH = natSize.current.h;
+    bgImgRef.current = null;
+    if (page.bgUrl) {
+      try {
+        const el = await loadImg(page.bgUrl);
+        natW = el.naturalWidth || natW;
+        natH = el.naturalHeight || natH;
+        bgImgRef.current = el;
+      } catch {
+        /* 배경 없이 진행 */
+      }
+    }
+    if (fabricRef.current !== c) return;
+    natSize.current = { w: natW, h: natH };
+    setBgUrl(page.bgUrl);
+
+    const maxW = Math.min(window.innerWidth - 48, 900);
+    const maxH = window.innerHeight - 260;
+    const s = Math.min(maxW / natW, maxH / natH, 1);
+    const dispW = Math.round(natW * s);
+    const dispH = Math.round(natH * s);
+    setDisp({ w: dispW, h: dispH });
+    c.setDimensions({ width: natW, height: natH });
+    c.setDimensions({ width: `${dispW}px`, height: `${dispH}px` }, { cssOnly: true });
+
+    if (page.canvasJson) {
+      try {
+        await c.loadFromJSON(page.canvasJson);
+      } catch {
+        c.clear();
+      }
+    } else {
+      c.clear();
+    }
+    c.renderAll();
+
+    history.current = [JSON.stringify(c.toJSON())];
+    histIndex.current = 0;
+    restoring.current = false;
+    setReady(true);
+    setCanUndo(false);
+    setCanRedo(false);
+  }, []);
+
   useEffect(() => {
     if (!canvasEl.current) return;
-    // 투명 오버레이 캔버스 (AI 이미지는 CSS 배경으로 깔고, Fabric은 글자/도형만)
     const canvas = new Canvas(canvasEl.current, {
       preserveObjectStacking: true,
       enableRetinaScaling: false,
@@ -183,55 +208,7 @@ export default function Editor() {
     canvas.on("selection:updated", onSel);
     canvas.on("selection:cleared", () => setHasSelection(false));
 
-    (async () => {
-      let natW = st.w || 1024;
-      let natH = st.h || 1024;
-      if (st.imageUrl) {
-        try {
-          const el = new Image();
-          el.crossOrigin = "anonymous";
-          await new Promise<void>((res, rej) => {
-            el.onload = () => res();
-            el.onerror = () => rej(new Error("img"));
-            el.src = st.imageUrl!;
-          });
-          natW = el.naturalWidth || natW;
-          natH = el.naturalHeight || natH;
-          bgImgRef.current = el;
-        } catch {
-          /* 배경 없이 진행 */
-        }
-      }
-      if (fabricRef.current !== canvas) return;
-      natSize.current = { w: natW, h: natH };
-
-      const maxW = Math.min(window.innerWidth - 48, 900);
-      const maxH = window.innerHeight - 200;
-      const s = Math.min(maxW / natW, maxH / natH, 1);
-      const dispW = Math.round(natW * s);
-      const dispH = Math.round(natH * s);
-      setDisp({ w: dispW, h: dispH });
-
-      canvas.setDimensions({ width: natW, height: natH }); // 백킹 = 원본
-      canvas.setDimensions({ width: `${dispW}px`, height: `${dispH}px` }, { cssOnly: true });
-
-      // 템플릿에서 열었으면 저장된 오버레이(글자/도형) 복원
-      if (st.canvasJson) {
-        try {
-          await canvas.loadFromJSON(st.canvasJson);
-        } catch {
-          /* 무시 */
-        }
-      }
-      canvas.renderAll();
-
-      history.current = [JSON.stringify(canvas.toJSON())];
-      histIndex.current = 0;
-      restoring.current = false;
-      setReady(true);
-      setCanUndo(false);
-      setCanRedo(false);
-    })();
+    showPage(0, false);
 
     return () => {
       canvas.dispose();
@@ -294,7 +271,6 @@ export default function Editor() {
     snapshot();
   }
 
-  // 도형을 현재 색으로 꽉 채우기(깨진 AI 글자를 덮을 때 유용)
   function fillSel() {
     const c = fabricRef.current;
     const obj = c?.getActiveObject() as FabricObject | undefined;
@@ -304,7 +280,6 @@ export default function Editor() {
     snapshot();
   }
 
-  // 선택한 글자 크기 조절
   function resizeText(factor: number) {
     const c = fabricRef.current;
     const obj = c?.getActiveObject() as (FabricObject & { fontSize?: number }) | undefined;
@@ -333,13 +308,23 @@ export default function Editor() {
     restore(history.current[histIndex.current]);
   }
 
-  function save(format: "png" | "jpg") {
+  // 현재 페이지 오버레이를 pagesRef에 반영
+  function syncActive() {
+    const c = fabricRef.current;
+    if (c && pagesRef.current[activeRef.current]) {
+      pagesRef.current[activeRef.current].canvasJson = c.toJSON() as Record<string, unknown>;
+    }
+  }
+
+  const baseName = () => (tplName.trim() || st.templateName || "홍보물");
+
+  // 현재 페이지 저장(원본 해상도 합성)
+  function save(format: Fmt) {
     const c = fabricRef.current;
     if (!c) return;
     c.discardActiveObject();
     c.renderAll();
     const { w, h } = natSize.current;
-    // 원본 이미지 + 오버레이를 원본 해상도로 합성
     const off = document.createElement("canvas");
     off.width = w;
     off.height = h;
@@ -349,28 +334,176 @@ export default function Editor() {
       ctx.fillRect(0, 0, w, h);
     }
     if (bgImgRef.current) ctx.drawImage(bgImgRef.current, 0, 0, w, h);
-    ctx.drawImage(c.lowerCanvasEl, 0, 0, w, h); // 오버레이(투명 배경) 위에 얹기
+    ctx.drawImage(c.lowerCanvasEl, 0, 0, w, h);
     const url = off.toDataURL(format === "jpg" ? "image/jpeg" : "image/png", 0.92);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `홍보물_${today()}.${format}`;
+    a.download = `${baseName()}_${active + 1}.${format}`;
     a.click();
+  }
+
+  // 한 페이지를 원본 해상도로 합성한 Blob
+  async function renderPageBlob(page: PageItem, format: Fmt): Promise<Blob> {
+    let w = natSize.current.w;
+    let h = natSize.current.h;
+    let bgEl: HTMLImageElement | null = null;
+    if (page.bgUrl) {
+      try {
+        bgEl = await loadImg(page.bgUrl);
+        w = bgEl.naturalWidth || w;
+        h = bgEl.naturalHeight || h;
+      } catch {
+        bgEl = null;
+      }
+    }
+    const scEl = document.createElement("canvas");
+    const sc = new StaticCanvas(scEl, { width: w, height: h, enableRetinaScaling: false });
+    if (page.canvasJson) {
+      try {
+        await sc.loadFromJSON(page.canvasJson);
+      } catch {
+        /* 오버레이 없이 */
+      }
+    }
+    sc.renderAll();
+    const off = document.createElement("canvas");
+    off.width = w;
+    off.height = h;
+    const ctx = off.getContext("2d")!;
+    if (format === "jpg") {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, w, h);
+    }
+    if (bgEl) ctx.drawImage(bgEl, 0, 0, w, h);
+    ctx.drawImage(sc.lowerCanvasEl, 0, 0, w, h);
+    sc.dispose();
+    return await new Promise<Blob>((r) =>
+      off.toBlob((b) => r(b!), format === "jpg" ? "image/jpeg" : "image/png", 0.92),
+    );
+  }
+
+  const [zipBusy, setZipBusy] = useState(false);
+
+  // 전체 페이지를 ZIP 하나로 다운로드
+  async function downloadAll(format: Fmt) {
+    if (zipBusy) return;
+    setZipBusy(true);
+    try {
+      syncActive();
+      const zip = new JSZip();
+      const base = baseName();
+      for (let i = 0; i < pagesRef.current.length; i++) {
+        const blob = await renderPageBlob(pagesRef.current[i], format);
+        zip.file(`${base}_${i + 1}.${format}`, blob);
+      }
+      const content = await zip.generateAsync({ type: "blob" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(content);
+      a.download = `${base}_${today()}.zip`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch {
+      setSaveMsg("전체 다운로드에 실패했어요. 다시 시도해 주세요.");
+    } finally {
+      setZipBusy(false);
+    }
+  }
+
+  async function deleteCurrentPage() {
+    if (pagesRef.current.length <= 1) return;
+    const idx = activeRef.current;
+    const p = pagesRef.current[idx];
+    if (p.id && st.templateId) {
+      try {
+        await deletePage(st.templateId, p.id);
+      } catch {
+        /* 무시 */
+      }
+    }
+    const next = pagesRef.current.filter((_, i) => i !== idx);
+    pagesRef.current = next;
+    setPages([...next]);
+    setDirty(true);
+    await showPage(Math.min(idx, next.length - 1), false);
+  }
+
+  // AI로 이미지의 글자를 수정/추가 — 현재 페이지를 참고해 '새 페이지'로 추가
+  async function runAiEdit() {
+    if (!aiText.trim() || aiBusy) return;
+    setAiBusy(true);
+    setAiMsg("");
+    try {
+      const { w, h } = natSize.current;
+      // 현재 페이지 이미지를 참고로 업로드(디자인 유지)
+      let refUploadId: string | undefined;
+      if (bgUrl) {
+        try {
+          const blob = await (await fetch(bgUrl)).blob();
+          refUploadId = await uploadRef(new File([blob], "ref.png", { type: blob.type || "image/png" }));
+        } catch {
+          refUploadId = undefined;
+        }
+      }
+      const r = await generate({
+        prompt:
+          "참고 이미지의 디자인·구도·색·배치와 나머지 글자는 그대로 두고, 아래 요청만 반영해줘. " +
+          "요청은 그림에 그대로 적는 글자가 아니라 '무엇을 어떻게 바꾸거나 더할지'에 대한 지시다. " +
+          `요청: "${aiText.trim()}". ` +
+          "요청에 없는 글자는 절대 바꾸지 말고, 화살표(→)나 지시문 자체를 그림에 쓰지 마. 없는 정보는 지어내지 마.",
+        width: w,
+        height: h,
+        quality: st.quality || "medium",
+        mode: "ai_text",
+        kind: st.kind,
+        ref_upload_id: refUploadId,
+        template_id: st.templateId,
+        similarity: 4,
+      });
+      // 새 페이지로 추가하고 그 페이지로 이동
+      const next = [...pagesRef.current, { id: r.page_id ?? null, bgUrl: r.image_url, canvasJson: null }];
+      pagesRef.current = next;
+      setPages([...next]);
+      setDirty(true);
+      setAiOpen(false);
+      setAiText("");
+      await showPage(next.length - 1);
+      setSaveMsg(`AI가 새 페이지를 만들었어요. 이번에 ${krw(r.cost_krw)} 썼어요.`);
+    } catch (e: unknown) {
+      const status = (e as { response?: { status?: number } })?.response?.status;
+      setAiMsg(
+        status === 402
+          ? "이번 달 사용할 수 있는 금액을 넘었어요. 관리자에게 문의하세요."
+          : "AI 수정에 실패했어요. 잠시 후 다시 시도해 주세요.",
+      );
+    } finally {
+      setAiBusy(false);
+    }
   }
 
   async function doSaveTemplate(e: FormEvent) {
     e.preventDefault();
-    const c = fabricRef.current;
-    if (!c || !tplName.trim()) return;
+    if (!tplName.trim()) return;
+    syncActive();
     setSaving(true);
     setSaveMsg("");
     try {
-      const canvas = c.toJSON() as Record<string, unknown>;
       if (st.templateId) {
-        await updateTemplate(st.templateId, { name: tplName.trim(), canvas_json: canvas, folder_id: folderId || null, move_to_root: !folderId });
+        await updateTemplate(st.templateId, {
+          name: tplName.trim(),
+          folder_id: folderId || null,
+          move_to_root: !folderId,
+        });
+        const withId = pagesRef.current.filter((p) => p.id) as { id: string; canvasJson: Record<string, unknown> | null }[];
+        if (withId.length) {
+          await savePages(
+            st.templateId,
+            withId.map((p) => ({ id: p.id, canvas_json: p.canvasJson ?? {} })),
+          );
+        }
       } else {
         await saveTemplate({
           name: tplName.trim(),
-          canvas_json: canvas,
+          canvas_json: pagesRef.current[0].canvasJson ?? {},
           size_w: natSize.current.w,
           size_h: natSize.current.h,
           generation_id: st.generationId,
@@ -387,7 +520,6 @@ export default function Editor() {
     }
   }
 
-  // 나가기 처리 — 변경사항 있으면 확인
   function tryLeave() {
     if (dirty) setLeaveOpen(true);
     else nav(-1);
@@ -398,16 +530,18 @@ export default function Editor() {
     nav(-1);
   }
   async function saveThenLeave() {
-    const c = fabricRef.current;
-    if (c && st.templateId) {
+    syncActive();
+    if (st.templateId) {
       try {
-        await updateTemplate(st.templateId, { canvas_json: c.toJSON() as Record<string, unknown> });
+        const withId = pagesRef.current.filter((p) => p.id) as { id: string; canvasJson: Record<string, unknown> | null }[];
+        if (withId.length) {
+          await savePages(st.templateId, withId.map((p) => ({ id: p.id, canvas_json: p.canvasJson ?? {} })));
+        }
       } catch {
         /* 무시하고 진행 */
       }
       doLeave();
     } else {
-      // 연결된 프로젝트가 없으면 이름 정해 저장
       setLeaveOpen(false);
       setShowSave(true);
     }
@@ -419,37 +553,37 @@ export default function Editor() {
 
   return (
     <div className="flex min-h-screen flex-col bg-neutral-100 dark:bg-neutral-950">
-      <header className="flex items-center justify-between border-b border-neutral-200 bg-white px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900">
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-200 bg-white px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900">
         <button onClick={tryLeave} className={tool}>
           <Icon icon="ph:arrow-left-bold" /> 뒤로
         </button>
         <div className="flex items-center gap-2 font-semibold">
           <Icon icon="ph:pencil-simple-duotone" className="text-emerald-600 text-[20px]" /> 편집기
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button onClick={() => { setAiMsg(""); setAiOpen(true); }} className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}>
             <Icon icon="ph:magic-wand-bold" /> AI로 글자 수정
           </button>
           <button onClick={() => setShowSave(true)} className={`${btn} border-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/30`}>
             <Icon icon="ph:floppy-disk-bold" /> 보관함에 저장
           </button>
-          <button onClick={() => save("png")} className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}>
-            <Icon icon="ph:download-simple-bold" /> PNG
+          <button onClick={() => save("png")} className={`${btn} bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-200`}>
+            <Icon icon="ph:download-simple-bold" /> 이 장 PNG
           </button>
           <button onClick={() => save("jpg")} className={`${btn} bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-200`}>
-            <Icon icon="ph:download-simple-bold" /> JPG
+            <Icon icon="ph:download-simple-bold" /> 이 장 JPG
           </button>
+          {pages.length > 1 && (
+            <button onClick={() => downloadAll("png")} disabled={zipBusy} className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}>
+              <Icon icon={zipBusy ? "ph:spinner-gap-bold" : "ph:package-bold"} className={zipBusy ? "animate-spin" : ""} /> 전체 ZIP
+            </button>
+          )}
         </div>
       </header>
 
       {saveMsg && (
         <div className="bg-emerald-50 px-4 py-2 text-center text-base text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
           {saveMsg}
-        </div>
-      )}
-      {aiMsg && !aiOpen && (
-        <div className="bg-emerald-50 px-4 py-2 text-center text-base text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
-          {aiMsg}
         </div>
       )}
 
@@ -462,7 +596,7 @@ export default function Editor() {
               AI로 글자 수정 또는 추가
             </h2>
             <p className="mt-1 text-base text-neutral-500 dark:text-neutral-400">
-              어떤 글자를 어떻게 바꾸거나 더할지 적어 주세요. 지금 그림을 참고해 그 부분만 다시 만들어요.
+              어떤 글자를 어떻게 바꾸거나 더할지 적어 주세요. 지금 그림을 참고해 <b>새 페이지</b>로 만들어요.
             </p>
             <textarea
               autoFocus
@@ -546,7 +680,7 @@ export default function Editor() {
               <option value="">폴더 없음</option>
               {withDepth(folders).map((f) => (
                 <option key={f.id} value={f.id}>
-                  {" ".repeat(f.depth * 2)}
+                  {" ".repeat(f.depth * 2)}
                   {f.name}
                 </option>
               ))}
@@ -578,6 +712,35 @@ export default function Editor() {
         <div className="mx-1 h-8 w-px bg-neutral-200 dark:bg-neutral-700" />
         <button onClick={undo} disabled={!canUndo} className={tool}><Icon icon="ph:arrow-counter-clockwise-bold" /> 되돌리기</button>
         <button onClick={redo} disabled={!canRedo} className={tool}><Icon icon="ph:arrow-clockwise-bold" /> 다시</button>
+      </div>
+
+      {/* 페이지 바 */}
+      <div className="flex items-center gap-2 overflow-x-auto border-b border-neutral-200 bg-neutral-50 px-4 py-2 dark:border-neutral-800 dark:bg-neutral-900/60">
+        <span className="shrink-0 text-sm font-semibold text-neutral-500 dark:text-neutral-400">
+          페이지 {active + 1}/{pages.length}
+        </span>
+        {pages.map((p, i) => (
+          <button
+            key={p.id ?? `p${i}`}
+            onClick={() => showPage(i)}
+            className={`relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border-2 ${
+              i === active ? "border-emerald-500 ring-2 ring-emerald-500/30" : "border-neutral-200 dark:border-neutral-700"
+            }`}
+            title={`${i + 1}페이지`}
+          >
+            {p.bgUrl ? (
+              <img src={p.bgUrl} alt={`${i + 1}페이지`} className="h-full w-full object-cover" />
+            ) : (
+              <span className="grid h-full place-items-center text-neutral-300"><Icon icon="ph:image-duotone" /></span>
+            )}
+            <span className="absolute bottom-0 right-0 rounded-tl bg-black/60 px-1 text-[10px] font-bold text-white">{i + 1}</span>
+          </button>
+        ))}
+        {pages.length > 1 && (
+          <button onClick={deleteCurrentPage} className={`${tool} h-10 shrink-0`}>
+            <Icon icon="ph:trash-bold" /> 이 페이지 삭제
+          </button>
+        )}
       </div>
 
       <div className="flex flex-1 items-center justify-center overflow-auto p-6">

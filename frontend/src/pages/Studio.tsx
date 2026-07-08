@@ -318,6 +318,9 @@ export default function Studio() {
                     templateId: result.project_id,
                     quality,
                     kind,
+                    pages: [
+                      { id: result.page_id, sort_order: 0, bg_url: result.image_url, canvas_json: null },
+                    ],
                   },
                 })
               }

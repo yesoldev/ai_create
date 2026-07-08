@@ -9,6 +9,14 @@ export interface TemplateListItem {
   updated_at: string;
 }
 
+export interface TemplatePage {
+  id: string | null; // 구 데이터 안전망은 null
+  sort_order: number;
+  canvas_json: Record<string, unknown> | null;
+  bg_url?: string | null;
+  thumb_url?: string;
+}
+
 export interface TemplateDetail {
   id: string;
   name: string;
@@ -17,6 +25,7 @@ export interface TemplateDetail {
   size_h: number | null;
   bg_url?: string | null;
   thumb_url?: string;
+  pages?: TemplatePage[];
 }
 
 export async function listTemplates(folderId?: string | null): Promise<TemplateListItem[]> {
@@ -48,4 +57,16 @@ export async function updateTemplate(
 
 export async function deleteTemplate(id: string): Promise<void> {
   await api.delete(`/api/templates/${id}`);
+}
+
+// 페이지별 오버레이(canvas_json) 일괄 저장
+export async function savePages(
+  templateId: string,
+  pages: { id: string; canvas_json: Record<string, unknown> }[],
+): Promise<void> {
+  await api.put(`/api/templates/${templateId}/pages`, { pages });
+}
+
+export async function deletePage(templateId: string, pageId: string): Promise<void> {
+  await api.delete(`/api/templates/${templateId}/pages/${pageId}`);
 }

@@ -79,16 +79,46 @@ async def create(body: TemplateBody, user: dict = Depends(get_current_user)):
 
 @router.get("/{tid}")
 async def get_template(tid: str, user: dict = Depends(get_current_user)):
+    import asyncio
+
     with get_conn() as conn:
         row = conn.execute("select * from public.templates where id=%s", (tid,)).fetchone()
-    if not row:
-        raise HTTPException(404, "템플릿을 찾을 수 없습니다.")
+        if not row:
+            raise HTTPException(404, "템플릿을 찾을 수 없습니다.")
+        pages = conn.execute(
+            "select id, sort_order, bg_image_path, thumb_path, canvas_json "
+            "from public.template_pages where template_id=%s order by sort_order, created_at",
+            (tid,),
+        ).fetchall()
+
     _with_thumb(row)
     if row.get("bg_image_path"):
         try:
             row["bg_url"] = await storage.signed_url("results", row["bg_image_path"])
         except Exception:  # noqa: BLE001
             row["bg_url"] = None
+
+    # 페이지가 없으면(구 데이터 안전망) 템플릿 자체를 1페이지로 취급
+    if not pages:
+        pages = [{
+            "id": None,
+            "sort_order": 0,
+            "bg_image_path": row.get("bg_image_path"),
+            "thumb_path": row.get("thumb_path"),
+            "canvas_json": row.get("canvas_json"),
+        }]
+
+    async def sign(p: dict) -> None:
+        if p.get("thumb_path"):
+            p["thumb_url"] = storage.public_url("thumbs", p["thumb_path"])
+        if p.get("bg_image_path"):
+            try:
+                p["bg_url"] = await storage.signed_url("results", p["bg_image_path"])
+            except Exception:  # noqa: BLE001
+                p["bg_url"] = None
+
+    await asyncio.gather(*(sign(p) for p in pages))
+    row["pages"] = pages
     return row
 
 
@@ -135,6 +165,53 @@ async def update(tid: str, body: TemplatePatch, user: dict = Depends(get_current
     if not row:
         raise HTTPException(404, "템플릿을 찾을 수 없습니다.")
     return {"id": row["id"]}
+
+
+class PageCanvas(BaseModel):
+    id: str
+    canvas_json: dict | None = None
+
+
+class PagesSaveBody(BaseModel):
+    pages: list[PageCanvas]
+
+
+@router.put("/{tid}/pages")
+async def save_pages(tid: str, body: PagesSaveBody, user: dict = Depends(get_current_user)):
+    """페이지별 오버레이(canvas_json) 저장 — 편집기 '보관함에 저장' 시 전체 페이지 반영."""
+    import json
+
+    with get_conn() as conn:
+        owner = conn.execute(
+            "select 1 from public.templates where id=%s and created_by=%s", (tid, user["id"])
+        ).fetchone()
+        if not owner:
+            raise HTTPException(404, "프로젝트를 찾을 수 없습니다.")
+        for p in body.pages:
+            conn.execute(
+                "update public.template_pages set canvas_json=%s where id=%s and template_id=%s",
+                (json.dumps(p.canvas_json) if p.canvas_json is not None else None, p.id, tid),
+            )
+    return {"ok": True}
+
+
+@router.delete("/{tid}/pages/{page_id}")
+async def delete_page(tid: str, page_id: str, user: dict = Depends(get_current_user)):
+    with get_conn() as conn:
+        owner = conn.execute(
+            "select 1 from public.templates where id=%s and created_by=%s", (tid, user["id"])
+        ).fetchone()
+        if not owner:
+            raise HTTPException(404, "프로젝트를 찾을 수 없습니다.")
+        cnt = conn.execute(
+            "select count(*) as c from public.template_pages where template_id=%s", (tid,)
+        ).fetchone()["c"]
+        if cnt <= 1:
+            raise HTTPException(400, "마지막 페이지는 지울 수 없습니다.")
+        conn.execute(
+            "delete from public.template_pages where id=%s and template_id=%s", (page_id, tid)
+        )
+    return {"ok": True}
 
 
 @router.post("/{tid}/copy")

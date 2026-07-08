@@ -113,6 +113,7 @@ export interface GenerateResult {
   generation_id: string;
   project_id: string;
   project_name: string;
+  page_id: string;
   image_url: string;
   thumb_url: string;
   size: string;

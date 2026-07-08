@@ -65,6 +65,29 @@ create trigger trg_templates_updated before update on public.templates
   for each row execute function public.set_updated_at();
 
 -- =========================================================
+-- template_pages : 프로젝트(템플릿) 내부 페이지들
+--   프로젝트 하나에 여러 이미지(페이지)를 담아 페이지별로 편집/다운로드한다.
+--   페이지 없는 기존 프로젝트는 백엔드가 조회 시 templates 자체를 1페이지로 취급.
+-- =========================================================
+create table if not exists public.template_pages (
+  id            uuid primary key default gen_random_uuid(),
+  template_id   uuid not null references public.templates(id) on delete cascade,
+  sort_order    integer not null default 0,
+  bg_image_path text,
+  thumb_path    text,
+  canvas_json   jsonb,
+  created_at    timestamptz not null default now()
+);
+create index if not exists idx_template_pages_template on public.template_pages(template_id, sort_order);
+alter table public.template_pages enable row level security;
+
+-- 기존 템플릿을 1페이지로 백필(페이지가 하나도 없는 템플릿만)
+insert into public.template_pages (template_id, sort_order, bg_image_path, thumb_path, canvas_json)
+select t.id, 0, t.bg_image_path, t.thumb_path, t.canvas_json
+from public.templates t
+where not exists (select 1 from public.template_pages p where p.template_id = t.id);
+
+-- =========================================================
 -- generations : 생성 이력 + 비용
 -- =========================================================
 create table if not exists public.generations (

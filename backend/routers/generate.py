@@ -133,8 +133,8 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
     # 6) 프로젝트(템플릿) — 제목 우선순위: 사용자 입력 name > 문구 > 프롬프트
     project_name = (body.name or body.text_content or body.prompt or "새 홍보물").strip()[:30] or "새 홍보물"
     with get_conn() as conn:
-        # template_id 가 오면 기존 프로젝트의 이미지를 갱신(편집기 'AI로 수정'),
-        # 아니면 새 프로젝트 생성.
+        # template_id 가 오면 기존 프로젝트에 '새 페이지'를 추가(편집기 'AI로 수정'),
+        # 아니면 새 프로젝트 생성 + 1페이지.
         existing = None
         if body.template_id:
             existing = conn.execute(
@@ -142,13 +142,20 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
                 (body.template_id, user["id"]),
             ).fetchone()
         if existing:
-            conn.execute(
-                "update public.templates set bg_image_path=%s, thumb_path=%s, prompt=%s, "
-                "size_w=%s, size_h=%s, updated_at=now() where id=%s",
-                (result_path, thumb_path, prompt, w, h, existing["id"]),
-            )
             project_id = existing["id"]
             project_name = existing["name"] or project_name
+            nxt = conn.execute(
+                "select coalesce(max(sort_order), -1) + 1 as n from public.template_pages where template_id=%s",
+                (project_id,),
+            ).fetchone()["n"]
+            page = conn.execute(
+                "insert into public.template_pages (template_id, sort_order, bg_image_path, thumb_path, canvas_json) "
+                "values (%s,%s,%s,%s,%s) returning id",
+                (project_id, nxt, result_path, thumb_path, None),
+            ).fetchone()
+            # 프로젝트 대표 썸네일을 최신 페이지로(홈/보관함 표시용). updated_at은 트리거가 갱신.
+            conn.execute("update public.templates set thumb_path=%s where id=%s", (thumb_path, project_id))
+            page_id = page["id"]
         else:
             prow = conn.execute(
                 "insert into public.templates "
@@ -157,6 +164,12 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
                 (project_name, None, prompt, w, h, body.dpi, result_path, thumb_path, user["id"]),
             ).fetchone()
             project_id = prow["id"]
+            page = conn.execute(
+                "insert into public.template_pages (template_id, sort_order, bg_image_path, thumb_path, canvas_json) "
+                "values (%s,0,%s,%s,%s) returning id",
+                (project_id, result_path, thumb_path, None),
+            ).fetchone()
+            page_id = page["id"]
         conn.execute(
             "insert into public.generations "
             "(id, user_id, template_id, prompt, model, quality, size, ref_image_path, result_path, cost_krw) "
@@ -172,6 +185,7 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
         "generation_id": gid,
         "project_id": project_id,
         "project_name": project_name,
+        "page_id": page_id,
         "image_url": image_url,
         "thumb_url": storage.public_url("thumbs", thumb_path),
         "size": f"{w}x{h}",

@@ -53,19 +53,22 @@ test("편집기: 결과에서 열어 글자 추가·되돌리기·저장", async
   await expect(page.getByRole("button", { name: "되돌리기" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "다시" })).toBeEnabled();
 
-  // PNG 저장 → 다운로드 발생
+  // 이 페이지 PNG 저장 → 다운로드 발생
   const dl = page.waitForEvent("download");
-  await page.getByRole("button", { name: "PNG", exact: true }).click();
+  await page.getByRole("button", { name: "이 장 PNG", exact: true }).click();
   const d = await dl;
-  expect(d.suggestedFilename()).toMatch(/홍보물_\d{8}\.png/);
+  expect(d.suggestedFilename()).toMatch(/홍보물_1\.png/);
 });
 
-test("편집기: AI로 글자 수정하면 template_id로 프로젝트를 갱신한다", async ({ page }) => {
+test("편집기: AI로 글자 수정하면 template_id로 새 페이지를 추가한다", async ({ page }) => {
   await login(page);
+  await page.route("**/api/refs/upload", (r) =>
+    r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ref_upload_id: "ref1" }) }),
+  );
   let sent: Record<string, unknown> = {};
   await page.route("**/api/generate", (route) => {
     sent = route.request().postDataJSON();
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ generation_id: "g2", project_id: "t", project_name: "제목", image_url: FAKE_PNG, thumb_url: FAKE_PNG, size: "1024x400", cost_krw: 10, remaining_krw: null }) });
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ generation_id: "g2", project_id: "t", project_name: "제목", page_id: "pg2", image_url: FAKE_PNG, thumb_url: FAKE_PNG, size: "1024x400", cost_krw: 10, remaining_krw: null }) });
   });
 
   await page.getByRole("button", { name: /새 홍보물 만들기/ }).click();
@@ -88,7 +91,9 @@ test("편집기: AI로 글자 수정하면 template_id로 프로젝트를 갱신
   );
   await page.getByRole("button", { name: /AI로 수정하기/ }).click();
   await aiReq;
-  await expect(page.getByText(/AI가 글자를 수정했어요/)).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText(/AI가 새 페이지를 만들었어요/)).toBeVisible({ timeout: 10_000 });
+  // 새 페이지가 추가되어 2/2 페이지가 된다
+  await expect(page.getByText("페이지 2/2")).toBeVisible();
   // 입력은 '넣을 글자'가 아니라 '수정 지시'로 프롬프트에 담긴다
   expect(String(sent.prompt)).toContain("여름 세일 시작");
   expect(sent.text_content).toBeUndefined();
