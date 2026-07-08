@@ -6,6 +6,7 @@ import JSZip from "jszip";
 import { saveTemplate, updateTemplate, savePages, deletePage, type TemplatePage } from "../lib/library";
 import { listFolders, withDepth, type Folder } from "../lib/folders";
 import { generate, uploadRef, krw } from "../lib/studio";
+import { api } from "../lib/api";
 import { ConfirmDialog } from "../components/dialogs";
 
 interface EditorState {
@@ -98,9 +99,14 @@ export default function Editor() {
   const [aiBusy, setAiBusy] = useState(false);
   const [aiStep, setAiStep] = useState(0);
   const [aiMsg, setAiMsg] = useState("");
+  const [remaining, setRemaining] = useState<number | null | undefined>(undefined); // 이번 달 잔액
 
   useEffect(() => {
     listFolders().then(setFolders).catch(() => {});
+    api
+      .get<{ remaining_krw: number | null }>("/api/usage/me")
+      .then((r) => setRemaining(r.data.remaining_krw))
+      .catch(() => {});
   }, []);
 
   // AI 수정 중 상태 메시지 순환
@@ -464,16 +470,23 @@ export default function Editor() {
       pagesRef.current = next;
       setPages([...next]);
       setDirty(true);
+      setRemaining(r.remaining_krw);
       setAiOpen(false);
       setAiText("");
       await showPage(next.length - 1);
-      setSaveMsg(`AI가 새 페이지를 만들었어요. 이번에 ${krw(r.cost_krw)} 썼어요.`);
+      setSaveMsg(
+        `AI가 새 페이지를 만들었어요. 이번에 ${krw(r.cost_krw)} 썼어요` +
+          (r.remaining_krw === null ? " (잔액 무제한)." : ` · 이번 달 남은 금액 ${krw(r.remaining_krw)}.`),
+      );
     } catch (e: unknown) {
-      const status = (e as { response?: { status?: number } })?.response?.status;
+      const err = e as { response?: { status?: number; data?: { detail?: string } } };
+      const detail = err?.response?.data?.detail;
       setAiMsg(
-        status === 402
+        err?.response?.status === 402
           ? "이번 달 사용할 수 있는 금액을 넘었어요. 관리자에게 문의하세요."
-          : "AI 수정에 실패했어요. 잠시 후 다시 시도해 주세요.",
+          : detail
+            ? `AI 수정 실패: ${detail}`
+            : "AI 수정에 실패했어요. 잠시 후 다시 시도해 주세요.",
       );
     } finally {
       setAiBusy(false);
@@ -724,6 +737,13 @@ export default function Editor() {
                 <Icon icon="ph:x-bold" />
               </button>
             </div>
+
+            {remaining !== undefined && (
+              <div className="mt-3 flex items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-base text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+                <Icon icon="ph:wallet-duotone" className="text-[20px]" />
+                이번 달 남은 금액: <b>{krw(remaining)}</b>
+              </div>
+            )}
 
             {aiBusy ? (
               <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">

@@ -202,11 +202,14 @@ export default function Studio() {
       });
       setResult(r);
     } catch (e: unknown) {
-      const status = (e as { response?: { status?: number } })?.response?.status;
+      const err = e as { response?: { status?: number; data?: { detail?: string } } };
+      const detail = err?.response?.data?.detail;
       setError(
-        status === 402
+        err?.response?.status === 402
           ? "이번 달 사용할 수 있는 금액을 넘었어요. 관리자에게 문의하세요."
-          : "이미지를 만들지 못했어요. 잠시 후 다시 시도해 주세요.",
+          : detail
+            ? `이미지를 만들지 못했어요: ${detail}`
+            : "이미지를 만들지 못했어요. 잠시 후 다시 시도해 주세요.",
       );
     } finally {
       setBusy(false);
@@ -298,7 +301,10 @@ export default function Studio() {
             완성됐어요!
           </h1>
           <p className="mt-2 text-lg text-neutral-500 dark:text-neutral-400">
-            아래에서 그림을 내려받으세요. 이번에 {krw(result.cost_krw)} 썼어요.
+            아래에서 그림을 내려받으세요. 이번에 <b>{krw(result.cost_krw)}</b> 썼어요
+            {result.remaining_krw === null ? " (잔액 무제한)." : (
+              <> · 이번 달 남은 금액 <b>{krw(result.remaining_krw)}</b>.</>
+            )}
           </p>
 
           <div className="mt-6 overflow-hidden rounded-3xl border-2 border-neutral-200 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900">
