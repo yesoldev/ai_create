@@ -619,40 +619,15 @@ export default function Studio() {
 
         {step === 4 && (
           <Section title="어떤 그림을 원하세요?" desc="쉽게 설명만 적어 주세요.">
-            <p className="mb-2 text-lg font-semibold">빠른 시작 <span className="font-normal text-neutral-400">(눌러서 채우고 고쳐 쓰세요)</span></p>
-            <div className="mb-6 flex flex-wrap gap-2">
-              {QUICK_STARTS.map((q) => (
-                <button
-                  key={q.key}
-                  type="button"
-                  onClick={() => setDescription(q.description)}
-                  className="flex h-11 items-center gap-2 rounded-full border-2 border-neutral-200 px-4 text-base font-semibold hover:border-emerald-400 hover:bg-emerald-50 dark:border-neutral-700 dark:hover:bg-emerald-950/30"
-                >
-                  <Icon icon={q.icon} className="text-[20px] text-emerald-600" />
-                  {q.label}
-                </button>
-              ))}
-            </div>
-            <div className="mb-2 flex flex-wrap items-center gap-2">
-              <label htmlFor="desc" className="text-lg font-semibold">
-                만들고 싶은 그림 설명
-              </label>
-              <button
-                type="button"
-                onClick={() => setShowRecentPrompts(true)}
-                className="ml-auto flex h-9 items-center gap-1.5 rounded-full border-2 border-neutral-200 px-3 text-sm font-semibold text-neutral-600 hover:border-emerald-400 hover:bg-emerald-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-emerald-950/30"
-              >
-                <Icon icon="ph:clock-counter-clockwise-duotone" className="text-emerald-600" />
-                최근 입력
-              </button>
-            </div>
-            <textarea
-              id="desc"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={4}
-              placeholder="예) 봄맞이 할인 행사 배너, 벚꽃과 밝은 분홍색 배경"
-              className="w-full rounded-2xl border-2 border-neutral-200 bg-neutral-50 p-4 text-lg outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15 dark:border-neutral-800 dark:bg-neutral-900"
+            <label htmlFor="bizname" className="mb-2 block text-lg font-semibold">
+              업체명 <span className="font-normal text-neutral-400">(그림에 크게 넣을 이름)</span>
+            </label>
+            <input
+              id="bizname"
+              value={bizName}
+              onChange={(e) => setBizName(e.target.value)}
+              placeholder="예) 해뜨는 식당"
+              className="h-14 w-full rounded-2xl border-2 border-neutral-200 bg-neutral-50 px-4 text-lg outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15 dark:border-neutral-800 dark:bg-neutral-900"
             />
 
             <p className="mb-2 mt-6 text-lg font-semibold">
@@ -691,15 +666,40 @@ export default function Studio() {
               })}
             </div>
 
-            <label htmlFor="bizname" className="mb-2 mt-6 block text-lg font-semibold">
-              업체명 <span className="font-normal text-neutral-400">(그림에 크게 넣을 이름)</span>
-            </label>
-            <input
-              id="bizname"
-              value={bizName}
-              onChange={(e) => setBizName(e.target.value)}
-              placeholder="예) 해뜨는 식당"
-              className="h-14 w-full rounded-2xl border-2 border-neutral-200 bg-neutral-50 px-4 text-lg outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15 dark:border-neutral-800 dark:bg-neutral-900"
+            <p className="mb-2 mt-6 text-lg font-semibold">빠른 시작 <span className="font-normal text-neutral-400">(눌러서 채우고 고쳐 쓰세요)</span></p>
+            <div className="mb-4 flex flex-wrap gap-2">
+              {QUICK_STARTS.map((q) => (
+                <button
+                  key={q.key}
+                  type="button"
+                  onClick={() => setDescription(q.description)}
+                  className="flex h-11 items-center gap-2 rounded-full border-2 border-neutral-200 px-4 text-base font-semibold hover:border-emerald-400 hover:bg-emerald-50 dark:border-neutral-700 dark:hover:bg-emerald-950/30"
+                >
+                  <Icon icon={q.icon} className="text-[20px] text-emerald-600" />
+                  {q.label}
+                </button>
+              ))}
+            </div>
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <label htmlFor="desc" className="text-lg font-semibold">
+                만들고 싶은 그림 설명
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowRecentPrompts(true)}
+                className="ml-auto flex h-9 items-center gap-1.5 rounded-full border-2 border-neutral-200 px-3 text-sm font-semibold text-neutral-600 hover:border-emerald-400 hover:bg-emerald-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-emerald-950/30"
+              >
+                <Icon icon="ph:clock-counter-clockwise-duotone" className="text-emerald-600" />
+                최근 입력
+              </button>
+            </div>
+            <textarea
+              id="desc"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={4}
+              placeholder="예) 봄맞이 할인 행사 배너, 벚꽃과 밝은 분홍색 배경"
+              className="w-full rounded-2xl border-2 border-neutral-200 bg-neutral-50 p-4 text-lg outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15 dark:border-neutral-800 dark:bg-neutral-900"
             />
 
             <div className="mb-2 mt-6 flex flex-wrap items-center gap-2">
