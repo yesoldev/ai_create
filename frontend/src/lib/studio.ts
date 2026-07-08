@@ -27,13 +27,14 @@ export interface QuickStart {
   label: string;
   description: string;
 }
+// 설명은 "분위기·배경"만 안내 — 글자 정보는 넣지 않도록(광고형은 글자 적어야 눈에 띔)
 export const QUICK_STARTS: QuickStart[] = [
-  { key: "job", icon: "ph:briefcase-duotone", label: "구인 공고", description: "직원 채용 안내, 신뢰감 있고 깔끔한 배경, 모집 부문·근무조건·연락처가 잘 보이게" },
-  { key: "sale", icon: "ph:tag-duotone", label: "할인 행사", description: "할인 행사 안내, 밝고 눈에 잘 띄는 배경, 활기찬 분위기" },
-  { key: "open", icon: "ph:storefront-duotone", label: "새 개업", description: "새로 문을 연 가게 개업 안내, 축하하는 밝은 분위기, 화사한 배경" },
-  { key: "recruit", icon: "ph:users-three-duotone", label: "회원 모집", description: "회원 모집 안내, 믿음이 가는 깔끔한 배경, 따뜻한 느낌" },
-  { key: "event", icon: "ph:calendar-check-duotone", label: "행사 안내", description: "행사 일정과 장소 안내, 정돈되고 읽기 쉬운 배경" },
-  { key: "notice", icon: "ph:megaphone-duotone", label: "안내문", description: "이용 안내문, 차분하고 깔끔한 배경, 글자가 잘 보이게" },
+  { key: "job", icon: "ph:briefcase-duotone", label: "구인 공고", description: "직원 채용 느낌, 신뢰감 있고 깔끔한 밝은 배경" },
+  { key: "sale", icon: "ph:tag-duotone", label: "할인 행사", description: "할인 행사 느낌, 밝고 눈에 잘 띄는 활기찬 배경" },
+  { key: "open", icon: "ph:storefront-duotone", label: "새 개업", description: "새 가게 개업 느낌, 축하하는 화사하고 밝은 배경" },
+  { key: "recruit", icon: "ph:users-three-duotone", label: "회원 모집", description: "회원 모집 느낌, 믿음이 가는 깔끔하고 따뜻한 배경" },
+  { key: "event", icon: "ph:calendar-check-duotone", label: "행사 안내", description: "행사 느낌, 정돈되고 산뜻한 배경" },
+  { key: "notice", icon: "ph:megaphone-duotone", label: "안내문", description: "안내 느낌, 차분하고 깔끔한 배경" },
 ];
 
 // 업종 선택 (신문 지면 광고용 이미지)
@@ -55,9 +56,11 @@ export const BUSINESS_TYPES: BizType[] = [
   { key: "etc", icon: "ph:dots-three-circle-duotone", label: "기타" },
 ];
 
-// 신문 지면 광고 맥락 — 프롬프트에 항상 덧붙임
+// 신문 지면 광고 맥락 — 프롬프트에 항상 덧붙임.
+// 광고형 배너는 글자가 많으면 눈에 안 들어옴 → 글자는 최소한, 그림 위주로.
 export const NEWSPAPER_HINT =
-  "신문 지면에 실릴 광고 이미지. 인쇄에 적합하게 깔끔하고 선명하며 글자가 또렷하게 보이도록.";
+  "신문 지면에 실릴 광고 이미지. 인쇄에 적합하게 깔끔하고 선명하게. " +
+  "글자는 최소한으로만 넣고 나머지는 그림과 여백으로 채워, 한눈에 들어오게 만들어줘.";
 
 export interface Estimate {
   quality: string;
@@ -131,4 +134,72 @@ export function toPx(value: number, unit: Unit, dpi = 300): number {
   if (unit === "px") return Math.round(value);
   if (unit === "mm") return Math.round((value * dpi) / 25.4);
   return Math.round((value * 10 * dpi) / 25.4); // cm
+}
+
+// ───────── 최근 입력한 설명 재사용 (localStorage, 최대 20개) ─────────
+const RECENT_PROMPTS_KEY = "ai_create.recent_prompts";
+const RECENT_PROMPTS_MAX = 20;
+
+export function getRecentPrompts(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_PROMPTS_KEY);
+    const arr = raw ? (JSON.parse(raw) as unknown) : [];
+    return Array.isArray(arr) ? arr.filter((s): s is string => typeof s === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export function pushRecentPrompt(text: string): void {
+  const t = text.trim();
+  if (!t) return;
+  const next = [t, ...getRecentPrompts().filter((p) => p !== t)].slice(0, RECENT_PROMPTS_MAX);
+  try {
+    localStorage.setItem(RECENT_PROMPTS_KEY, JSON.stringify(next));
+  } catch {
+    /* 저장 실패는 무시 */
+  }
+}
+
+// ───────── 최근 생성 이미지 목록 (참고 이미지 선택·다운로드용) ─────────
+export interface RecentGen {
+  id: string;
+  template_id: string | null;
+  prompt: string;
+  size: string;
+  thumb_url: string;
+  image_url: string | null;
+}
+
+export async function listGenerations(): Promise<RecentGen[]> {
+  const { data } = await api.get<{ items: RecentGen[] }>("/api/generations");
+  return data.items;
+}
+
+// ───────── 이미지 내려받기 (PNG/JPG) ─────────
+function todayStamp(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`;
+}
+
+export async function downloadImage(url: string, format: "png" | "jpg", name = "홍보물"): Promise<void> {
+  const blob = await (await fetch(url)).blob();
+  let out = blob;
+  if (format === "jpg") {
+    const bmp = await createImageBitmap(blob);
+    const canvas = document.createElement("canvas");
+    canvas.width = bmp.width;
+    canvas.height = bmp.height;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(bmp, 0, 0);
+    out = await new Promise<Blob>((r) => canvas.toBlob((b) => r(b!), "image/jpeg", 0.9));
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(out);
+  a.download = `${name}_${todayStamp()}.${format}`;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }

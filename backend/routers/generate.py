@@ -5,6 +5,7 @@ Phase 1: 프롬프트+사이즈+품질 생성, 한도 사전 체크, Storage 저
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import uuid
 
@@ -74,10 +75,23 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
             detail=f"이번 달 한도가 부족합니다. 예상 {est:,.0f}원 / 잔여 {remaining:,.0f}원",
         )
 
-    # 2) AI 합성 모드면 문구를 프롬프트에 주입
+    # 2) AI 합성 모드면 문구를 프롬프트에 주입.
+    #    광고형 배너는 글자가 많으면 눈에 안 들어옴 → 지정 문구(업체명 위주)만 크게,
+    #    그 외 설명/잔글씨는 넣지 않도록 강하게 지시.
     prompt = body.prompt
-    if body.mode == "ai_text" and body.text_content:
-        prompt = f'{prompt}\n\n다음 한글 문구를 정확히 큼직하게 넣어줘: "{body.text_content}"'
+    if body.mode == "ai_text":
+        if body.text_content:
+            prompt = (
+                f"{prompt}\n\n"
+                f'그림 안에는 다음 한글 문구만 크고 또렷하게 넣어줘: "{body.text_content}". '
+                f"이 문구 외에 설명하는 긴 문장이나 자잘한 글자, 가짜 정보(전화번호·주소 등)는 "
+                f"절대 넣지 마. 글자는 최소한으로, 나머지는 그림과 여백으로 채워줘."
+            )
+        else:
+            prompt = (
+                f"{prompt}\n\n"
+                f"그림 안에는 글자를 거의 넣지 말고, 배경과 그림 위주로 깔끔하게 만들어줘."
+            )
 
     # 참고 이미지 준비 (이전 생성물 또는 첨부 업로드)
     ref_path = None
@@ -225,6 +239,13 @@ async def my_generations(user: dict = Depends(get_current_user), limit: int = 30
             "from public.generations where user_id=%s order by created_at desc limit %s",
             (user["id"], min(limit, 100)),
         ).fetchall()
-    for r in rows:
+
+    async def enrich(r: dict) -> None:
         r["thumb_url"] = storage.public_url("thumbs", f"{user['id']}/{r['id']}.jpg")
+        try:
+            r["image_url"] = await storage.signed_url("results", r["result_path"])
+        except Exception:  # noqa: BLE001
+            r["image_url"] = None
+
+    await asyncio.gather(*(enrich(r) for r in rows))
     return {"items": rows}

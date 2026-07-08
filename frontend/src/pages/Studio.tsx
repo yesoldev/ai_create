@@ -10,14 +10,18 @@ import {
   toPx,
   fetchEstimate,
   generate,
-  uploadRef,
   copywrite,
   krw,
+  downloadImage,
+  getRecentPrompts,
+  pushRecentPrompt,
+  listGenerations,
   type Estimate,
   type GenerateResult,
   type SizePreset,
   type Unit,
   type BizType,
+  type RecentGen,
 } from "../lib/studio";
 
 type Kind = "banner" | "flyer";
@@ -26,33 +30,6 @@ const QUALITIES = [
   { key: "medium", label: "보통 (추천)", desc: "대부분 이걸로 충분" },
   { key: "high", label: "고급 (선명)", desc: "인쇄·중요한 것" },
 ];
-
-function today(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`;
-}
-
-async function downloadImage(url: string, format: "png" | "jpg") {
-  const blob = await (await fetch(url)).blob();
-  let out = blob;
-  if (format === "jpg") {
-    const bmp = await createImageBitmap(blob);
-    const canvas = document.createElement("canvas");
-    canvas.width = bmp.width;
-    canvas.height = bmp.height;
-    const ctx = canvas.getContext("2d")!;
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(bmp, 0, 0);
-    out = await new Promise<Blob>((r) => canvas.toBlob((b) => r(b!), "image/jpeg", 0.9));
-  }
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(out);
-  a.download = `홍보물_${today()}.${format}`;
-  a.click();
-  URL.revokeObjectURL(a.href);
-}
 
 const STEP_LABELS = ["종류", "업종", "크기·품질", "문구", "만들기"];
 
@@ -79,10 +56,22 @@ export default function Studio() {
   const [unit, setUnit] = useState<Unit>("px");
   const [quality, setQuality] = useState("medium");
   const [description, setDescription] = useState("");
+  const [bizName, setBizName] = useState(""); // 업체명 — 그림에 크게 넣을 주 문구
   const [textContent, setTextContent] = useState("");
-  const [refFile, setRefFile] = useState<File | null>(null);
+  const [refGen, setRefGen] = useState<RecentGen | null>(null); // 참고할 최근 생성 이미지
   const [copyIdeas, setCopyIdeas] = useState<string[]>([]);
   const [copyBusy, setCopyBusy] = useState(false);
+
+  // 최근 생성 이미지(참고 이미지 선택용) + 최근 입력 프롬프트
+  const [recentGens, setRecentGens] = useState<RecentGen[]>([]);
+  const [showRefPicker, setShowRefPicker] = useState(false);
+  const [showRecentPrompts, setShowRecentPrompts] = useState(false);
+
+  useEffect(() => {
+    listGenerations()
+      .then(setRecentGens)
+      .catch(() => setRecentGens([]));
+  }, []);
 
   async function suggestCopy() {
     setCopyBusy(true);
@@ -155,22 +144,21 @@ export default function Studio() {
     setBusy(true);
     setError("");
     try {
-      // 첨부 사진이 있으면 먼저 업로드(참고 재생성 버튼으로 온 경우는 제외)
-      let refUploadId: string | undefined;
-      if (!refGenerationId && refFile) {
-        refUploadId = await uploadRef(refFile);
-      }
-      const hasRef = !!refGenerationId || !!refUploadId;
+      // 참고 이미지: "비슷하게 다시 만들기"(인자) 우선, 아니면 문구 단계에서 고른 최근 이미지
+      const refId = refGenerationId || refGen?.id;
+      const hasRef = !!refId;
+      // 그림에 넣을 글자 = 업체명(주) + 추가 문구. 없으면 undefined → 글자 최소화 생성
+      const wantedText = [bizName.trim(), textContent.trim()].filter(Boolean).join("\n");
       const fullPrompt = `${bizLabel ? `[업종: ${bizLabel}] ` : ""}${description}. ${NEWSPAPER_HINT}`;
+      pushRecentPrompt(description); // 다음에 재사용할 수 있게 저장
       const r = await generate({
         prompt: fullPrompt,
         width: effW,
         height: effH,
         quality,
         mode: "ai_text",
-        text_content: textContent.trim() || undefined,
-        ref_generation_id: refGenerationId,
-        ref_upload_id: refUploadId,
+        text_content: wantedText || undefined,
+        ref_generation_id: refId,
         similarity: hasRef ? 2 : undefined,
       });
       setResult(r);
@@ -194,14 +182,15 @@ export default function Studio() {
     setBizEtc("");
     setSize(null);
     setDescription("");
+    setBizName("");
     setTextContent("");
-    setRefFile(null);
+    setRefGen(null);
     setCopyIdeas([]);
   }
 
   // 마법사 도중 이탈 시 입력 손실 확인
   function guardedExit() {
-    const hasProgress = !!kind || description.trim() || textContent.trim();
+    const hasProgress = !!kind || description.trim() || bizName.trim() || textContent.trim();
     if (hasProgress && !window.confirm("지금 나가면 입력한 내용이 사라져요. 나갈까요?")) return;
     nav("/");
   }
@@ -214,8 +203,8 @@ export default function Studio() {
     }
   }
 
-  // ───────── 결과 화면 ─────────
-  if (result) {
+  // ───────── 결과 화면 (생성 중이면 아래 busy 화면을 먼저 보여줌) ─────────
+  if (result && !busy) {
     return (
       <Shell onExit={() => nav("/")}>
         <div className="mx-auto max-w-3xl">
@@ -475,9 +464,21 @@ export default function Studio() {
                 </button>
               ))}
             </div>
-            <label htmlFor="desc" className="mb-2 block text-lg font-semibold">
-              만들고 싶은 그림 설명
-            </label>
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <label htmlFor="desc" className="text-lg font-semibold">
+                만들고 싶은 그림 설명
+              </label>
+              {getRecentPrompts().length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowRecentPrompts(true)}
+                  className="flex h-9 items-center gap-1.5 rounded-full border-2 border-neutral-200 px-3 text-sm font-semibold text-neutral-600 hover:border-emerald-400 hover:bg-emerald-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-emerald-950/30"
+                >
+                  <Icon icon="ph:clock-counter-clockwise-duotone" className="text-emerald-600" />
+                  최근 입력
+                </button>
+              )}
+            </div>
             <textarea
               id="desc"
               value={description}
@@ -486,9 +487,21 @@ export default function Studio() {
               placeholder="예) 봄맞이 할인 행사 배너, 벚꽃과 밝은 분홍색 배경"
               className="w-full rounded-2xl border-2 border-neutral-200 bg-neutral-50 p-4 text-lg outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15 dark:border-neutral-800 dark:bg-neutral-900"
             />
+
+            <label htmlFor="bizname" className="mb-2 mt-6 block text-lg font-semibold">
+              업체명 <span className="font-normal text-neutral-400">(그림에 크게 넣을 이름)</span>
+            </label>
+            <input
+              id="bizname"
+              value={bizName}
+              onChange={(e) => setBizName(e.target.value)}
+              placeholder="예) 해뜨는 식당"
+              className="h-14 w-full rounded-2xl border-2 border-neutral-200 bg-neutral-50 px-4 text-lg outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15 dark:border-neutral-800 dark:bg-neutral-900"
+            />
+
             <div className="mb-2 mt-6 flex flex-wrap items-center gap-2">
               <label htmlFor="txt" className="text-lg font-semibold">
-                그림에 넣을 글자 <span className="font-normal text-neutral-400">(없으면 비워 두세요)</span>
+                더 넣을 글자 <span className="font-normal text-neutral-400">(선택 · 없으면 비워 두세요)</span>
               </label>
               <button
                 type="button"
@@ -500,6 +513,9 @@ export default function Studio() {
                 {copyBusy ? "생각 중..." : "문구 추천받기"}
               </button>
             </div>
+            <p className="mb-2 text-base text-neutral-500 dark:text-neutral-400">
+              광고는 글자가 적어야 눈에 잘 들어와요. 꼭 필요한 짧은 문구만 적어 주세요.
+            </p>
             {copyIdeas.length > 0 && (
               <div className="mb-3 flex flex-wrap gap-2">
                 {copyIdeas.map((idea, i) => (
@@ -523,27 +539,29 @@ export default function Studio() {
             />
 
             <p className="mb-2 mt-6 text-lg font-semibold">
-              참고할 사진 <span className="font-normal text-neutral-400">(선택 · 비슷한 느낌으로 만들어요)</span>
+              참고할 이미지 <span className="font-normal text-neutral-400">(선택 · 최근 만든 것과 비슷하게 만들어요)</span>
             </p>
-            {refFile ? (
+            {refGen ? (
               <div className="flex items-center gap-3 rounded-2xl border-2 border-emerald-200 bg-emerald-50/50 p-3 dark:border-emerald-900/50 dark:bg-emerald-950/20">
-                <img src={URL.createObjectURL(refFile)} alt="참고 사진" className="h-16 w-16 rounded-lg object-cover" />
-                <span className="flex-1 truncate text-base">{refFile.name}</span>
-                <button type="button" onClick={() => setRefFile(null)} className="flex h-10 items-center gap-1 rounded-lg px-3 text-base text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800">
+                <img src={refGen.thumb_url} alt="참고 이미지" className="h-16 w-16 rounded-lg object-cover" />
+                <span className="flex-1 truncate text-base">{refGen.prompt?.slice(0, 24) || "최근 만든 이미지"}</span>
+                <button type="button" onClick={() => setRefGen(null)} className="flex h-10 items-center gap-1 rounded-lg px-3 text-base text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800">
                   <Icon icon="ph:x-bold" /> 빼기
                 </button>
               </div>
+            ) : recentGens.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setShowRefPicker(true)}
+                className="flex h-14 w-full items-center gap-2 rounded-2xl border-2 border-dashed border-neutral-300 px-4 text-lg text-neutral-500 hover:border-emerald-400 hover:text-emerald-700 dark:border-neutral-700"
+              >
+                <Icon icon="ph:images-duotone" className="text-[24px]" />
+                최근 만든 이미지에서 고르기
+              </button>
             ) : (
-              <label className="flex h-14 cursor-pointer items-center gap-2 rounded-2xl border-2 border-dashed border-neutral-300 px-4 text-lg text-neutral-500 hover:border-emerald-400 hover:text-emerald-700 dark:border-neutral-700">
-                <Icon icon="ph:image-square-duotone" className="text-[24px]" />
-                사진 고르기
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => setRefFile(e.target.files?.[0] ?? null)}
-                />
-              </label>
+              <p className="rounded-2xl border-2 border-dashed border-neutral-200 px-4 py-4 text-base text-neutral-400 dark:border-neutral-800">
+                아직 만든 이미지가 없어요. 하나 만들면 여기서 골라 비슷하게 만들 수 있어요.
+              </p>
             )}
           </Section>
         )}
@@ -559,7 +577,9 @@ export default function Studio() {
               />
               <SummaryRow label="품질" value={QUALITIES.find((q) => q.key === quality)?.label ?? quality} />
               <SummaryRow label="설명" value={description} />
+              {bizName.trim() && <SummaryRow label="업체명" value={bizName} />}
               {textContent.trim() && <SummaryRow label="넣을 글자" value={textContent} />}
+              {refGen && <SummaryRow label="참고 이미지" value="최근 만든 것과 비슷하게" />}
             </dl>
             <EstimateBar estimate={estimate} />
             {error && (
@@ -592,7 +612,106 @@ export default function Studio() {
           )}
         </div>
       </div>
+
+      {/* 최근 입력한 설명 재사용 모달 (#1) */}
+      {showRecentPrompts && (
+        <PickerModal
+          title="최근 입력한 설명"
+          desc="눌러서 그대로 채워요."
+          icon="ph:clock-counter-clockwise-duotone"
+          onClose={() => setShowRecentPrompts(false)}
+        >
+          <ul className="flex flex-col gap-2">
+            {getRecentPrompts().map((p, i) => (
+              <li key={i}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDescription(p);
+                    setShowRecentPrompts(false);
+                  }}
+                  className="w-full rounded-2xl border-2 border-neutral-200 px-4 py-3 text-left text-base hover:border-emerald-400 hover:bg-emerald-50 dark:border-neutral-700 dark:hover:bg-emerald-950/30"
+                >
+                  {p}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </PickerModal>
+      )}
+
+      {/* 참고할 최근 생성 이미지 선택 모달 (#4) */}
+      {showRefPicker && (
+        <PickerModal
+          title="참고할 이미지 고르기"
+          desc="비슷한 느낌으로 새로 만들어요."
+          icon="ph:images-duotone"
+          onClose={() => setShowRefPicker(false)}
+        >
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {recentGens.map((g) => (
+              <button
+                key={g.id}
+                type="button"
+                onClick={() => {
+                  setRefGen(g);
+                  setShowRefPicker(false);
+                }}
+                className="overflow-hidden rounded-2xl border-2 border-neutral-200 text-left transition hover:border-emerald-400 dark:border-neutral-800"
+              >
+                <div className="aspect-square bg-neutral-100 dark:bg-neutral-800">
+                  <img src={g.thumb_url} alt={g.prompt?.slice(0, 12) || "이미지"} className="h-full w-full object-cover" loading="lazy" />
+                </div>
+                <p className="truncate px-2 py-1.5 text-sm">{g.prompt?.slice(0, 16) || "홍보물"}</p>
+              </button>
+            ))}
+          </div>
+        </PickerModal>
+      )}
     </Shell>
+  );
+}
+
+/** 큰 목록/그리드용 모달 (dialogs.tsx의 좁은 모달과 별개) */
+function PickerModal({
+  title,
+  desc,
+  icon,
+  onClose,
+  children,
+}: {
+  title: string;
+  desc?: string;
+  icon: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="flex max-h-[80vh] w-full max-w-2xl flex-col rounded-3xl bg-white p-6 shadow-2xl dark:bg-neutral-900 rise"
+      >
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <h2 className="flex items-center gap-2 text-xl font-bold">
+              <Icon icon={icon} className="text-emerald-600 text-[26px]" />
+              {title}
+            </h2>
+            {desc && <p className="mt-1 text-base text-neutral-500 dark:text-neutral-400">{desc}</p>}
+          </div>
+          <button onClick={onClose} className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800">
+            <Icon icon="ph:x-bold" className="text-[20px]" />
+          </button>
+        </div>
+        <div className="overflow-y-auto">{children}</div>
+      </div>
+    </div>
   );
 }
 

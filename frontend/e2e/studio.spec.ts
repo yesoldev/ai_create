@@ -59,7 +59,7 @@ test("스튜디오 마법사로 배너를 만든다 (생성 모킹)", async ({ p
   );
   await page.getByRole("button", { name: /문구 추천받기/ }).click();
   await page.getByRole("button", { name: "봄맞이 30% 할인" }).click();
-  await expect(page.getByLabel(/그림에 넣을 글자/)).toHaveValue("봄맞이 30% 할인");
+  await expect(page.getByLabel(/더 넣을 글자/)).toHaveValue("봄맞이 30% 할인");
   await page.getByRole("button", { name: "다음", exact: true }).click();
 
   // 4단계: 요약 확인 후 만들기
@@ -111,10 +111,19 @@ test("업종 '기타' 선택 시 직접 입력칸이 뜨고 프롬프트에 반�
   expect(String(sent.prompt)).toContain("[업종: 세탁소]");
 });
 
-test("참고할 사진을 첨부하면 ref_upload_id로 생성된다", async ({ page }) => {
+test("참고할 이미지를 최근 생성물에서 고르면 ref_generation_id로 생성된다", async ({ page }) => {
   await login(page);
-  await page.route("**/api/refs/upload", (r) =>
-    r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ref_upload_id: "ref1" }) }),
+  // 참고 이미지 선택용 최근 생성 목록 모킹
+  await page.route("**/api/generations", (r) =>
+    r.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: [
+          { id: "prev1", template_id: null, prompt: "지난 배너", size: "500x200", thumb_url: FAKE_PNG, image_url: FAKE_PNG },
+        ],
+      }),
+    }),
   );
   let sent: Record<string, unknown> = {};
   await page.route("**/api/generate", (route) => {
@@ -128,17 +137,15 @@ test("참고할 사진을 첨부하면 ref_upload_id로 생성된다", async ({ 
   await page.getByRole("button", { name: /보통 \(추천\)/ }).click();
   await page.getByRole("button", { name: "다음", exact: true }).click();
   await page.getByLabel("만들고 싶은 그림 설명").fill("따뜻한 가게 홍보");
-  await page.setInputFiles('input[type="file"]', {
-    name: "photo.png",
-    mimeType: "image/png",
-    buffer: Buffer.from(FAKE_PNG.split(",")[1], "base64"),
-  });
-  await page.getByRole("button", { name: /빼기/ }).waitFor(); // 첨부됨 표시
+  // 최근 만든 이미지에서 참고 이미지 고르기
+  await page.getByRole("button", { name: /최근 만든 이미지에서 고르기/ }).click();
+  await page.getByRole("button", { name: /지난 배너/ }).click();
+  await page.getByRole("button", { name: /빼기/ }).waitFor(); // 선택됨 표시
   await page.getByRole("button", { name: "다음", exact: true }).click();
   await page.getByRole("button", { name: "만들기", exact: true }).click();
 
   await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
-  expect(sent.ref_upload_id).toBe("ref1");
+  expect(sent.ref_generation_id).toBe("prev1");
 });
 
 test("직접 크기(mm) 입력이 px로 환산되어 생성된다", async ({ page }) => {
