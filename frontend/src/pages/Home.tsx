@@ -206,7 +206,7 @@ export default function Home() {
                 }}
                 className="mt-2 flex h-12 w-full items-center justify-center gap-1.5 rounded-2xl border-2 border-neutral-200 px-5 text-lg font-bold text-neutral-700 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
               >
-                <Icon icon="ph:pencil-simple-bold" /> 글자 넣고 꾸미기
+                <Icon icon="ph:pencil-simple-bold" /> 글자 수정 또는 추가
               </button>
             )}
             <p className="mt-3 text-center text-base text-neutral-500 dark:text-neutral-400">

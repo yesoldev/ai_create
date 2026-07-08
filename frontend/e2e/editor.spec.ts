@@ -35,7 +35,7 @@ test("편집기: 결과에서 열어 글자 추가·되돌리기·저장", async
   await reachResult(page);
 
   // 결과 → 편집기
-  await page.getByRole("button", { name: /글자 넣고 꾸미기/ }).click();
+  await page.getByRole("button", { name: /글자 수정 또는 추가/ }).click();
   await expect(page).toHaveURL(/\/editor$/);
   await expect(page.getByRole("button", { name: "글자 넣기" })).toBeVisible();
 
@@ -60,11 +60,43 @@ test("편집기: 결과에서 열어 글자 추가·되돌리기·저장", async
   expect(d.suggestedFilename()).toMatch(/홍보물_\d{8}\.png/);
 });
 
+test("편집기: AI로 글자 수정하면 template_id로 프로젝트를 갱신한다", async ({ page }) => {
+  await login(page);
+  let sent: Record<string, unknown> = {};
+  await page.route("**/api/generate", (route) => {
+    sent = route.request().postDataJSON();
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ generation_id: "g2", project_id: "t", project_name: "제목", image_url: FAKE_PNG, thumb_url: FAKE_PNG, size: "1024x400", cost_krw: 10, remaining_krw: null }) });
+  });
+
+  await page.getByRole("button", { name: /새 홍보물 만들기/ }).click();
+  await page.getByRole("button", { name: /배너/ }).first().click();
+  await page.getByRole("button", { name: "음식점" }).click();
+  await page.getByRole("button", { name: /보통 \(추천\)/ }).click();
+  await page.getByRole("button", { name: "다음", exact: true }).click();
+  await page.getByLabel("만들고 싶은 그림 설명").fill("테스트");
+  await page.getByRole("button", { name: "다음", exact: true }).click();
+  await page.getByRole("button", { name: "만들기", exact: true }).click();
+  await page.getByRole("button", { name: /글자 수정 또는 추가/ }).click();
+  await expect(page).toHaveURL(/\/editor$/);
+
+  // AI로 글자 수정 → 기존 프로젝트(template_id) 갱신 요청
+  await page.getByRole("button", { name: /AI로 글자 수정/ }).click();
+  await expect(page.getByRole("heading", { name: "AI로 글자 수정 또는 추가" })).toBeVisible();
+  await page.getByPlaceholder(/봄맞이 30% 할인/).fill("여름 세일 시작");
+  const aiReq = page.waitForRequest(
+    (r) => r.url().endsWith("/api/generate") && r.method() === "POST" && r.postDataJSON()?.template_id === "t",
+  );
+  await page.getByRole("button", { name: /AI로 수정하기/ }).click();
+  await aiReq;
+  await expect(page.getByText(/AI가 글자를 수정했어요/)).toBeVisible({ timeout: 10_000 });
+  expect(String(sent.text_content)).toContain("여름 세일 시작");
+});
+
 test("편집기: 변경 후 나가면 저장 확인 모달이 뜬다", async ({ page }) => {
   await login(page);
   await page.route("**/api/templates/*", (r) => r.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
   await reachResult(page);
-  await page.getByRole("button", { name: /글자 넣고 꾸미기/ }).click();
+  await page.getByRole("button", { name: /글자 수정 또는 추가/ }).click();
   await page.getByRole("button", { name: "글자 넣기" }).click(); // 변경 발생
 
   // 뒤로 → 저장 확인 모달

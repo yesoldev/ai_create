@@ -15,8 +15,8 @@ export const SIZES: Record<"banner" | "flyer", SizePreset[]> = {
     { key: "banner_square", label: "정사각 배너", w: 1024, h: 1024, hint: "SNS 게시물" },
   ],
   flyer: [
+    { key: "flyer_sample", label: "전단지 (보통)", w: 1773, h: 3189, hint: "기본 · 화면·간단 인쇄" },
     { key: "flyer_a4_300", label: "전단지 A4 (인쇄용)", w: 2480, h: 3508, hint: "300DPI · 인쇄소 표준" },
-    { key: "flyer_sample", label: "전단지 (보통)", w: 1773, h: 3189, hint: "화면·간단 인쇄" },
   ],
 };
 
@@ -84,7 +84,16 @@ export const NEWSPAPER_HINT =
   "인쇄용 홍보 광고 이미지. 깔끔하고 선명하며 색이 밝고 또렷하게. " +
   "특별히 색을 지정하지 않았으면 밝고 깨끗한 배경(흰색이나 밝은 색)을 쓰고, " +
   "누렇거나 갈색·세피아·신문지 같은 칙칙한 색조는 쓰지 마. " +
-  "글자는 최소한으로만 넣고 나머지는 그림과 여백으로 채워, 한눈에 들어오게 만들어줘.";
+  "지정한 문구와 업체명만 크게 넣고, 전화번호·주소 같은 지어낸 정보나 긴 문장은 넣지 마. " +
+  "글자는 최소한으로만, 나머지는 그림과 여백으로 채워 한눈에 들어오게 만들어줘.";
+
+// 전단지(세로형)용 맥락 — 전단지는 글자가 많음. 제공한 문구를 구조적으로 배치.
+export const FLYER_HINT =
+  "세로로 긴 인쇄용 전단지 광고 이미지. 흰 종이나 깔끔한 배경 위에, " +
+  "업체명은 위쪽에 크고 눈에 띄는 제목으로, 나머지 문구는 항목(불릿)과 " +
+  "연락처(전화·위치)로 구분해 위에서 아래로 읽기 쉽게 배치해줘. " +
+  "제공한 한글 문구를 오탈자 없이 정확히 그대로 넣고, 없는 정보는 지어내지 마. " +
+  "색은 밝고 선명하게, 누렇거나 세피아 톤은 쓰지 마.";
 
 export interface Estimate {
   quality: string;
@@ -118,6 +127,9 @@ export interface GeneratePayload {
   quality: string;
   mode: "ai_text" | "layer";
   text_content?: string;
+  name?: string;          // 사용자가 정한 제목
+  kind?: "banner" | "flyer";
+  template_id?: string;   // 있으면 기존 프로젝트 이미지 갱신(편집기 AI 수정)
   ref_generation_id?: string;
   ref_upload_id?: string;
   similarity?: number; // 1~4

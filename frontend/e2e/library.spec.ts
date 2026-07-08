@@ -49,7 +49,7 @@ test("보관함: 편집기에서 저장하고 다시 열기", async ({ page }) =
   await page.getByLabel("만들고 싶은 그림 설명").fill("테스트");
   await page.getByRole("button", { name: "다음", exact: true }).click();
   await page.getByRole("button", { name: "만들기", exact: true }).click();
-  await page.getByRole("button", { name: /글자 넣고 꾸미기/ }).click();
+  await page.getByRole("button", { name: /글자 수정 또는 추가/ }).click();
   await expect(page).toHaveURL(/\/editor$/);
 
   // 보관함에 저장

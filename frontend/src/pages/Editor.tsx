@@ -4,6 +4,7 @@ import { Icon } from "@iconify/react";
 import { Canvas, IText, Rect, Circle, type FabricObject } from "fabric";
 import { saveTemplate, updateTemplate } from "../lib/library";
 import { listFolders, withDepth, type Folder } from "../lib/folders";
+import { generate, uploadRef, krw } from "../lib/studio";
 import { ConfirmDialog } from "../components/dialogs";
 
 interface EditorState {
@@ -14,6 +15,8 @@ interface EditorState {
   templateId?: string; // 연결된 프로젝트(템플릿)
   canvasJson?: Record<string, unknown>;
   templateName?: string;
+  quality?: string;
+  kind?: "banner" | "flyer";
 }
 
 function today(): string {
@@ -30,6 +33,7 @@ export default function Editor() {
   const canvasEl = useRef<HTMLCanvasElement>(null);
   const fabricRef = useRef<Canvas | null>(null);
   const bgImgRef = useRef<HTMLImageElement | null>(null); // 원본 이미지(합성용)
+  const genIdRef = useRef<string | undefined>(st.generationId); // AI 수정 시 참고할 최신 생성 id
   const natSize = useRef({ w: 1024, h: 1024 });
   const history = useRef<string[]>([]);
   const histIndex = useRef(-1);
@@ -49,10 +53,76 @@ export default function Editor() {
   const [folderId, setFolderId] = useState<string>("");
   const [dirty, setDirty] = useState(false);
   const [leaveOpen, setLeaveOpen] = useState(false);
+  // AI로 글자 수정/추가
+  const [bgUrl, setBgUrl] = useState<string | undefined>(st.imageUrl);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiText, setAiText] = useState("");
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiMsg, setAiMsg] = useState("");
 
   useEffect(() => {
     listFolders().then(setFolders).catch(() => {});
   }, []);
+
+  // AI로 이미지의 글자를 수정/추가 — 현재 이미지를 참고해 다시 생성하고 배경을 교체
+  async function runAiEdit() {
+    if (!aiText.trim() || aiBusy) return;
+    setAiBusy(true);
+    setAiMsg("");
+    try {
+      const { w, h } = natSize.current;
+      // 참고 이미지: 생성물 id가 있으면 그대로, 없으면(프로젝트로 연 경우) 현재 이미지를 업로드해 참고
+      let refGenerationId = genIdRef.current;
+      let refUploadId: string | undefined;
+      if (!refGenerationId && bgUrl) {
+        try {
+          const blob = await (await fetch(bgUrl)).blob();
+          refUploadId = await uploadRef(new File([blob], "ref.png", { type: blob.type || "image/png" }));
+        } catch {
+          refGenerationId = undefined; // 참고 없이 진행
+        }
+      }
+      const r = await generate({
+        prompt:
+          "참고 이미지와 똑같은 디자인·구도·색을 최대한 그대로 유지하면서, " +
+          "아래 한글 문구로 글자만 자연스럽게 바꾸거나 추가해줘. 없는 정보는 지어내지 마.",
+        width: w,
+        height: h,
+        quality: st.quality || "medium",
+        mode: "ai_text",
+        text_content: aiText.trim(),
+        kind: st.kind,
+        ref_generation_id: refGenerationId,
+        ref_upload_id: refUploadId,
+        template_id: st.templateId,
+        similarity: 3,
+      });
+      // 새 이미지를 배경으로 교체(원본 해상도 합성용 이미지도 갱신)
+      const el = new Image();
+      el.crossOrigin = "anonymous";
+      await new Promise<void>((res, rej) => {
+        el.onload = () => res();
+        el.onerror = () => rej(new Error("img"));
+        el.src = r.image_url;
+      });
+      bgImgRef.current = el;
+      genIdRef.current = r.generation_id;
+      setBgUrl(r.image_url);
+      setDirty(true);
+      setAiOpen(false);
+      setAiText("");
+      setAiMsg(`AI가 글자를 수정했어요. 이번에 ${krw(r.cost_krw)} 썼어요.`);
+    } catch (e: unknown) {
+      const status = (e as { response?: { status?: number } })?.response?.status;
+      setAiMsg(
+        status === 402
+          ? "이번 달 사용할 수 있는 금액을 넘었어요. 관리자에게 문의하세요."
+          : "AI 수정에 실패했어요. 잠시 후 다시 시도해 주세요.",
+      );
+    } finally {
+      setAiBusy(false);
+    }
+  }
 
   const snapshot = useCallback(() => {
     if (!fabricRef.current || restoring.current) return;
@@ -338,6 +408,9 @@ export default function Editor() {
           <Icon icon="ph:pencil-simple-duotone" className="text-emerald-600 text-[20px]" /> 편집기
         </div>
         <div className="flex gap-2">
+          <button onClick={() => { setAiMsg(""); setAiOpen(true); }} className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}>
+            <Icon icon="ph:magic-wand-bold" /> AI로 글자 수정
+          </button>
           <button onClick={() => setShowSave(true)} className={`${btn} border-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/30`}>
             <Icon icon="ph:floppy-disk-bold" /> 보관함에 저장
           </button>
@@ -353,6 +426,48 @@ export default function Editor() {
       {saveMsg && (
         <div className="bg-emerald-50 px-4 py-2 text-center text-base text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
           {saveMsg}
+        </div>
+      )}
+      {aiMsg && !aiOpen && (
+        <div className="bg-emerald-50 px-4 py-2 text-center text-base text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+          {aiMsg}
+        </div>
+      )}
+
+      {/* AI로 글자 수정/추가 */}
+      {aiOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => !aiBusy && setAiOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-neutral-900">
+            <h2 className="flex items-center gap-2 text-xl font-bold">
+              <Icon icon="ph:magic-wand-duotone" className="text-emerald-600 text-[24px]" />
+              AI로 글자 수정 또는 추가
+            </h2>
+            <p className="mt-1 text-base text-neutral-500 dark:text-neutral-400">
+              AI로 수정될 문구, 추가할 문구를 입력해 주세요. 지금 그림과 비슷하게 다시 만들어요.
+            </p>
+            <textarea
+              autoFocus
+              value={aiText}
+              onChange={(e) => setAiText(e.target.value)}
+              rows={5}
+              placeholder={"예)\n봄맞이 30% 할인\n3월 한 달간"}
+              className="mt-4 w-full rounded-xl border-2 border-neutral-200 p-3 text-lg outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-800"
+            />
+            {aiMsg && <p className="mt-2 text-base text-red-600 dark:text-red-400">{aiMsg}</p>}
+            <div className="mt-5 flex gap-2">
+              <button
+                onClick={runAiEdit}
+                disabled={aiBusy || !aiText.trim()}
+                className={`${btn} flex-1 justify-center bg-emerald-600 text-white hover:bg-emerald-500`}
+              >
+                <Icon icon={aiBusy ? "ph:spinner-gap-bold" : "ph:magic-wand-bold"} className={aiBusy ? "animate-spin" : ""} />
+                {aiBusy ? "AI가 만드는 중..." : "AI로 수정하기"}
+              </button>
+              <button onClick={() => setAiOpen(false)} disabled={aiBusy} className={`${btn} justify-center border-2 border-neutral-200 dark:border-neutral-700`}>
+                취소
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -435,16 +550,16 @@ export default function Editor() {
             opacity: ready ? 1 : 0,
             width: disp.w || undefined,
             height: disp.h || undefined,
-            backgroundImage: st.imageUrl ? `url(${st.imageUrl})` : undefined,
+            backgroundImage: bgUrl ? `url(${bgUrl})` : undefined,
             backgroundSize: "100% 100%",
           }}
         >
           <canvas ref={canvasEl} className="absolute inset-0" />
         </div>
       </div>
-      {!st.imageUrl && ready && (
+      {!bgUrl && ready && (
         <p className="pb-4 text-center text-base text-neutral-500">
-          편집할 그림이 없어요. 먼저 홍보물을 만든 뒤 "글자 넣고 꾸미기"로 여세요.
+          편집할 그림이 없어요. 먼저 홍보물을 만든 뒤 "글자 수정 또는 추가"로 여세요.
         </p>
       )}
     </div>

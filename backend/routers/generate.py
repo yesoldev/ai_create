@@ -49,6 +49,9 @@ class GenerateBody(BaseModel):
     quality: str = "medium"       # low | medium | high
     mode: str = "ai_text"         # layer | ai_text
     text_content: str | None = None
+    name: str | None = None       # 사용자가 정한 제목(있으면 프로젝트명으로 사용)
+    kind: str | None = None       # banner | flyer (문구 배치 방식 참고용)
+    template_id: str | None = None  # 있으면 새 프로젝트 대신 이 프로젝트의 이미지를 갱신
     # Phase 2 확장(수용만):
     bg_preset_id: str | None = None
     ref_generation_id: str | None = None
@@ -76,22 +79,13 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
         )
 
     # 2) AI 합성 모드면 문구를 프롬프트에 주입.
-    #    광고형 배너는 글자가 많으면 눈에 안 들어옴 → 지정 문구(업체명 위주)만 크게,
-    #    그 외 설명/잔글씨는 넣지 않도록 강하게 지시.
+    #    배치 방식(글자 최소화 vs 전단지 배치)은 프론트가 kind에 맞춰 prompt에 이미
+    #    지시하므로, 여기서는 넣을 문구만 정확히 전달한다.
     prompt = body.prompt
-    if body.mode == "ai_text":
-        if body.text_content:
-            prompt = (
-                f"{prompt}\n\n"
-                f'그림 안에는 다음 한글 문구만 크고 또렷하게 넣어줘: "{body.text_content}". '
-                f"이 문구 외에 설명하는 긴 문장이나 자잘한 글자, 가짜 정보(전화번호·주소 등)는 "
-                f"절대 넣지 마. 글자는 최소한으로, 나머지는 그림과 여백으로 채워줘."
-            )
-        else:
-            prompt = (
-                f"{prompt}\n\n"
-                f"그림 안에는 글자를 거의 넣지 말고, 배경과 그림 위주로 깔끔하게 만들어줘."
-            )
+    if body.mode == "ai_text" and body.text_content:
+        prompt = (
+            f'{prompt}\n\n그림에 넣을 한글 문구(정확히, 오탈자 없이):\n"{body.text_content}"'
+        )
 
     # 참고 이미지 준비 (이전 생성물 또는 첨부 업로드)
     ref_path = None
@@ -136,16 +130,33 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
     await storage.upload("results", result_path, png, "image/png")
     await storage.upload("thumbs", thumb_path, storage.make_thumbnail(png), "image/jpeg")
 
-    # 6) 프로젝트(템플릿) 자동 생성 + 생성 기록 + 사용량 가산
-    project_name = (body.text_content or body.prompt or "새 홍보물").strip()[:30] or "새 홍보물"
+    # 6) 프로젝트(템플릿) — 제목 우선순위: 사용자 입력 name > 문구 > 프롬프트
+    project_name = (body.name or body.text_content or body.prompt or "새 홍보물").strip()[:30] or "새 홍보물"
     with get_conn() as conn:
-        prow = conn.execute(
-            "insert into public.templates "
-            "(name, canvas_json, prompt, size_w, size_h, dpi, bg_image_path, thumb_path, created_by) "
-            "values (%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id",
-            (project_name, None, prompt, w, h, body.dpi, result_path, thumb_path, user["id"]),
-        ).fetchone()
-        project_id = prow["id"]
+        # template_id 가 오면 기존 프로젝트의 이미지를 갱신(편집기 'AI로 수정'),
+        # 아니면 새 프로젝트 생성.
+        existing = None
+        if body.template_id:
+            existing = conn.execute(
+                "select id, name from public.templates where id=%s and created_by=%s",
+                (body.template_id, user["id"]),
+            ).fetchone()
+        if existing:
+            conn.execute(
+                "update public.templates set bg_image_path=%s, thumb_path=%s, prompt=%s, "
+                "size_w=%s, size_h=%s, updated_at=now() where id=%s",
+                (result_path, thumb_path, prompt, w, h, existing["id"]),
+            )
+            project_id = existing["id"]
+            project_name = existing["name"] or project_name
+        else:
+            prow = conn.execute(
+                "insert into public.templates "
+                "(name, canvas_json, prompt, size_w, size_h, dpi, bg_image_path, thumb_path, created_by) "
+                "values (%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id",
+                (project_name, None, prompt, w, h, body.dpi, result_path, thumb_path, user["id"]),
+            ).fetchone()
+            project_id = prow["id"]
         conn.execute(
             "insert into public.generations "
             "(id, user_id, template_id, prompt, model, quality, size, ref_image_path, result_path, cost_krw) "

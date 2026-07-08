@@ -8,6 +8,7 @@ import {
   BUSINESS_TYPES,
   COLORS,
   NEWSPAPER_HINT,
+  FLYER_HINT,
   toPx,
   fetchEstimate,
   generate,
@@ -62,7 +63,9 @@ export default function Studio() {
   const [quality, setQuality] = useState("medium");
   const [description, setDescription] = useState("");
   const [bizName, setBizName] = useState(""); // 업체명 — 그림에 크게 넣을 주 문구
-  const [textContent, setTextContent] = useState("");
+  const [textContent, setTextContent] = useState(""); // 배너: 더 넣을 짧은 문구
+  const [flyerText, setFlyerText] = useState(""); // 전단지: 여러 줄 문구(항목·연락처 등)
+  const [title, setTitle] = useState(""); // 저장될 제목(파일명·프로젝트명)
   const [color, setColor] = useState<ColorChoice | null>(null); // 배경 색상 선택
   const [refGen, setRefGen] = useState<RecentGen | null>(null); // 참고할 최근 생성 이미지
   const [copyIdeas, setCopyIdeas] = useState<string[]>([]);
@@ -175,11 +178,15 @@ export default function Studio() {
       // 참고 이미지: "비슷하게 다시 만들기"(인자) 우선, 아니면 문구 단계에서 고른 최근 이미지
       const refId = refGenerationId || refGen?.id;
       const hasRef = !!refId;
-      // 그림에 넣을 글자 = 업체명(주) + 추가 문구. 없으면 undefined → 글자 최소화 생성
-      const wantedText = [bizName.trim(), textContent.trim()].filter(Boolean).join("\n");
+      const isFlyer = kind === "flyer";
+      // 그림에 넣을 글자: 전단지는 업체명+전단지 문구(여러 줄), 배너는 업체명+짧은 문구
+      const wantedText = isFlyer
+        ? [bizName.trim(), flyerText.trim()].filter(Boolean).join("\n")
+        : [bizName.trim(), textContent.trim()].filter(Boolean).join("\n");
       const colorHint = color ? ` 전체적인 색감과 분위기를 ${color.name} 계열로 조화롭게 통일해, 밝고 선명하게.` : "";
       const extra = extraPrompt?.trim() ? ` ${extraPrompt.trim()}.` : "";
-      const fullPrompt = `${bizLabel ? `[업종: ${bizLabel}] ` : ""}${description}.${extra}${colorHint} ${NEWSPAPER_HINT}`;
+      const hint = isFlyer ? FLYER_HINT : NEWSPAPER_HINT;
+      const fullPrompt = `${bizLabel ? `[업종: ${bizLabel}] ` : ""}${description}.${extra}${colorHint} ${hint}`;
       pushRecentPrompt(description); // 다음에 재사용할 수 있게 저장
       const r = await generate({
         prompt: fullPrompt,
@@ -188,6 +195,8 @@ export default function Studio() {
         quality,
         mode: "ai_text",
         text_content: wantedText || undefined,
+        name: title.trim() || undefined,
+        kind: kind || undefined,
         ref_generation_id: refId,
         similarity: hasRef ? 2 : undefined,
       });
@@ -214,6 +223,8 @@ export default function Studio() {
     setDescription("");
     setBizName("");
     setTextContent("");
+    setFlyerText("");
+    setTitle("");
     setColor(null);
     setRefGen(null);
     setCopyIdeas([]);
@@ -270,7 +281,8 @@ export default function Studio() {
 
   async function handleDownload(url: string, format: "png" | "jpg") {
     try {
-      await downloadImage(url, format);
+      const fname = title.trim() || result?.project_name || "홍보물";
+      await downloadImage(url, format, fname);
     } catch {
       alert("내려받기에 실패했어요. 잠시 후 다시 시도해 주세요.");
     }
@@ -304,11 +316,13 @@ export default function Studio() {
                     h: effH,
                     generationId: result.generation_id,
                     templateId: result.project_id,
+                    quality,
+                    kind,
                   },
                 })
               }
             >
-              글자 넣고 꾸미기
+              글자 수정 또는 추가
             </BigButton>
             <BigButton icon="ph:arrows-clockwise-bold" tone="soft" onClick={startRegen}>
               비슷하게 다시 만들기
@@ -702,44 +716,65 @@ export default function Studio() {
               className="w-full rounded-2xl border-2 border-neutral-200 bg-neutral-50 p-4 text-lg outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15 dark:border-neutral-800 dark:bg-neutral-900"
             />
 
-            <div className="mb-2 mt-6 flex flex-wrap items-center gap-2">
-              <label htmlFor="txt" className="text-lg font-semibold">
-                더 넣을 글자 <span className="font-normal text-neutral-400">(선택 · 없으면 비워 두세요)</span>
-              </label>
-              <button
-                type="button"
-                onClick={suggestCopy}
-                disabled={copyBusy}
-                className="flex h-9 items-center gap-1.5 rounded-full border-2 border-emerald-300 px-3 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 dark:text-emerald-300 dark:hover:bg-emerald-950/30"
-              >
-                <Icon icon={copyBusy ? "ph:spinner-gap-bold" : "ph:sparkle-duotone"} className={copyBusy ? "animate-spin" : ""} />
-                {copyBusy ? "생각 중..." : "문구 추천받기"}
-              </button>
-            </div>
-            <p className="mb-2 text-base text-neutral-500 dark:text-neutral-400">
-              광고는 글자가 적어야 눈에 잘 들어와요. 꼭 필요한 짧은 문구만 적어 주세요.
-            </p>
-            {copyIdeas.length > 0 && (
-              <div className="mb-3 flex flex-wrap gap-2">
-                {copyIdeas.map((idea, i) => (
+            {kind === "flyer" ? (
+              <>
+                <label htmlFor="flyertxt" className="mb-2 mt-6 block text-lg font-semibold">
+                  전단지 문구 <span className="font-normal text-neutral-400">(그림에 넣을 내용을 줄바꿈해 적어 주세요)</span>
+                </label>
+                <p className="mb-2 text-base text-neutral-500 dark:text-neutral-400">
+                  제목 아래에 들어갈 항목·안내·연락처를 한 줄씩 적으면 그대로 배치돼요.
+                </p>
+                <textarea
+                  id="flyertxt"
+                  value={flyerText}
+                  onChange={(e) => setFlyerText(e.target.value)}
+                  rows={8}
+                  placeholder={"예)\n직원 모집 (남/여)\n주방 보조 · 홀 서빙\n근무: 오전 9시~오후 6시\n식사 제공 · 4대보험\n위치: 서울시 강남구 테헤란로 123\n전화: 010-1234-5678"}
+                  className="w-full rounded-2xl border-2 border-neutral-200 bg-neutral-50 p-4 text-lg outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15 dark:border-neutral-800 dark:bg-neutral-900"
+                />
+              </>
+            ) : (
+              <>
+                <div className="mb-2 mt-6 flex flex-wrap items-center gap-2">
+                  <label htmlFor="txt" className="text-lg font-semibold">
+                    더 넣을 글자 <span className="font-normal text-neutral-400">(선택 · 없으면 비워 두세요)</span>
+                  </label>
                   <button
-                    key={i}
                     type="button"
-                    onClick={() => setTextContent(idea)}
-                    className="rounded-xl border-2 border-neutral-200 px-3 py-2 text-left text-base hover:border-emerald-400 hover:bg-emerald-50 dark:border-neutral-700 dark:hover:bg-emerald-950/30"
+                    onClick={suggestCopy}
+                    disabled={copyBusy}
+                    className="flex h-9 items-center gap-1.5 rounded-full border-2 border-emerald-300 px-3 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 dark:text-emerald-300 dark:hover:bg-emerald-950/30"
                   >
-                    {idea}
+                    <Icon icon={copyBusy ? "ph:spinner-gap-bold" : "ph:sparkle-duotone"} className={copyBusy ? "animate-spin" : ""} />
+                    {copyBusy ? "생각 중..." : "문구 추천받기"}
                   </button>
-                ))}
-              </div>
+                </div>
+                <p className="mb-2 text-base text-neutral-500 dark:text-neutral-400">
+                  광고는 글자가 적어야 눈에 잘 들어와요. 꼭 필요한 짧은 문구만 적어 주세요.
+                </p>
+                {copyIdeas.length > 0 && (
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    {copyIdeas.map((idea, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setTextContent(idea)}
+                        className="rounded-xl border-2 border-neutral-200 px-3 py-2 text-left text-base hover:border-emerald-400 hover:bg-emerald-50 dark:border-neutral-700 dark:hover:bg-emerald-950/30"
+                      >
+                        {idea}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <input
+                  id="txt"
+                  value={textContent}
+                  onChange={(e) => setTextContent(e.target.value)}
+                  placeholder="예) 봄맞이 30% 할인"
+                  className="h-14 w-full rounded-2xl border-2 border-neutral-200 bg-neutral-50 px-4 text-lg outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15 dark:border-neutral-800 dark:bg-neutral-900"
+                />
+              </>
             )}
-            <input
-              id="txt"
-              value={textContent}
-              onChange={(e) => setTextContent(e.target.value)}
-              placeholder="예) 봄맞이 30% 할인"
-              className="h-14 w-full rounded-2xl border-2 border-neutral-200 bg-neutral-50 px-4 text-lg outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15 dark:border-neutral-800 dark:bg-neutral-900"
-            />
 
             <p className="mb-2 mt-6 text-lg font-semibold">
               참고할 이미지 <span className="font-normal text-neutral-400">(선택 · 최근 만든 것과 비슷하게 만들어요)</span>
@@ -770,7 +805,17 @@ export default function Studio() {
         )}
 
         {step === 5 && (size || custom) && (
-          <Section title="이대로 만들까요?" desc="확인하고 만들기를 눌러 주세요.">
+          <Section title="이대로 만들까요?" desc="제목을 정하고 만들기를 눌러 주세요.">
+            <label htmlFor="title" className="mb-1 block text-lg font-semibold">
+              제목 <span className="font-normal text-neutral-400">(저장·파일 이름 · 비우면 자동으로 지어요)</span>
+            </label>
+            <input
+              id="title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder={bizName.trim() || "예) 봄맞이 할인 배너"}
+              className="mb-5 h-14 w-full rounded-2xl border-2 border-neutral-200 bg-neutral-50 px-4 text-lg outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15 dark:border-neutral-800 dark:bg-neutral-900"
+            />
             <dl className="divide-y divide-neutral-200 rounded-2xl border-2 border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
               <SummaryRow label="종류" value={kind === "banner" ? "배너" : "전단지"} />
               <SummaryRow label="업종" value={bizLabel || "-"} />
@@ -782,7 +827,9 @@ export default function Studio() {
               <SummaryRow label="설명" value={description} />
               {color && <SummaryRow label="전체 색감" value={color.name} />}
               {bizName.trim() && <SummaryRow label="업체명" value={bizName} />}
-              {textContent.trim() && <SummaryRow label="넣을 글자" value={textContent} />}
+              {kind === "flyer"
+                ? flyerText.trim() && <SummaryRow label="전단지 문구" value={flyerText} />
+                : textContent.trim() && <SummaryRow label="넣을 글자" value={textContent} />}
               {refGen && <SummaryRow label="참고 이미지" value="최근 만든 것과 비슷하게" />}
             </dl>
             <EstimateBar estimate={estimate} />
