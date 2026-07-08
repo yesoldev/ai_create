@@ -202,7 +202,7 @@ test("바탕 색을 고르면 프롬프트에 색이 주입된다", async ({ pag
   await page.getByLabel("만들고 싶은 그림 설명").fill("가게 홍보");
   await page.getByRole("button", { name: "파랑", exact: true }).click();
   await page.getByRole("button", { name: "다음", exact: true }).click();
-  await expect(page.getByText("바탕 색")).toBeVisible(); // 요약에 색 표시
+  await expect(page.getByText("전체 색감")).toBeVisible(); // 요약에 색 표시
   await page.getByRole("button", { name: "만들기", exact: true }).click();
 
   await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });

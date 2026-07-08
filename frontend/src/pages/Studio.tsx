@@ -177,7 +177,7 @@ export default function Studio() {
       const hasRef = !!refId;
       // 그림에 넣을 글자 = 업체명(주) + 추가 문구. 없으면 undefined → 글자 최소화 생성
       const wantedText = [bizName.trim(), textContent.trim()].filter(Boolean).join("\n");
-      const colorHint = color ? ` 주요 배경과 색은 ${color.name} 계열로 밝고 선명하게.` : "";
+      const colorHint = color ? ` 전체적인 색감과 분위기를 ${color.name} 계열로 조화롭게 통일해, 밝고 선명하게.` : "";
       const extra = extraPrompt?.trim() ? ` ${extraPrompt.trim()}.` : "";
       const fullPrompt = `${bizLabel ? `[업종: ${bizLabel}] ` : ""}${description}.${extra}${colorHint} ${NEWSPAPER_HINT}`;
       pushRecentPrompt(description); // 다음에 재사용할 수 있게 저장
@@ -656,7 +656,7 @@ export default function Studio() {
             />
 
             <p className="mb-2 mt-6 text-lg font-semibold">
-              바탕 색 <span className="font-normal text-neutral-400">(선택 · 누르면 그 색으로 만들어요)</span>
+              전체 색감 <span className="font-normal text-neutral-400">(선택 · 그림 전체의 색상 분위기를 정해요)</span>
             </p>
             <div className="flex flex-wrap gap-2.5">
               {COLORS.map((c) => {
@@ -780,7 +780,7 @@ export default function Studio() {
               />
               <SummaryRow label="품질" value={QUALITIES.find((q) => q.key === quality)?.label ?? quality} />
               <SummaryRow label="설명" value={description} />
-              {color && <SummaryRow label="바탕 색" value={color.name} />}
+              {color && <SummaryRow label="전체 색감" value={color.name} />}
               {bizName.trim() && <SummaryRow label="업체명" value={bizName} />}
               {textContent.trim() && <SummaryRow label="넣을 글자" value={textContent} />}
               {refGen && <SummaryRow label="참고 이미지" value="최근 만든 것과 비슷하게" />}
