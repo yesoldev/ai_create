@@ -587,61 +587,6 @@ export default function Editor() {
         </div>
       )}
 
-      {/* AI로 글자 수정/추가 */}
-      {aiOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => !aiBusy && setAiOpen(false)}>
-          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-neutral-900">
-            <h2 className="flex items-center gap-2 text-xl font-bold">
-              <Icon icon="ph:magic-wand-duotone" className="text-emerald-600 text-[24px]" />
-              AI로 글자 수정 또는 추가
-            </h2>
-            <p className="mt-1 text-base text-neutral-500 dark:text-neutral-400">
-              어떤 글자를 어떻게 바꾸거나 더할지 적어 주세요. 지금 그림을 참고해 <b>새 페이지</b>로 만들어요.
-            </p>
-            <textarea
-              autoFocus
-              value={aiText}
-              onChange={(e) => setAiText(e.target.value)}
-              rows={5}
-              placeholder={"예)\n'목적'을 '매물'로 바꿔줘\n맨 아래에 전화번호 010-1234-5678 추가해줘"}
-              className="mt-4 w-full rounded-xl border-2 border-neutral-200 p-3 text-lg outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-800"
-            />
-            {aiMsg && <p className="mt-2 text-base text-red-600 dark:text-red-400">{aiMsg}</p>}
-            <div className="mt-5 flex gap-2">
-              <button
-                onClick={runAiEdit}
-                disabled={aiBusy || !aiText.trim()}
-                className={`${btn} flex-1 justify-center bg-emerald-600 text-white hover:bg-emerald-500`}
-              >
-                <Icon icon={aiBusy ? "ph:spinner-gap-bold" : "ph:magic-wand-bold"} className={aiBusy ? "animate-spin" : ""} />
-                {aiBusy ? "AI가 만드는 중..." : "AI로 수정하기"}
-              </button>
-              <button onClick={() => setAiOpen(false)} disabled={aiBusy} className={`${btn} justify-center border-2 border-neutral-200 dark:border-neutral-700`}>
-                취소
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* AI 수정 진행 중 — 이미지 생성처럼 상태 텍스트 표시 */}
-      {aiBusy && (
-        <div className="fixed inset-0 z-[60] flex flex-col items-center justify-center bg-white/90 text-center dark:bg-neutral-950/90">
-          <Icon icon="ph:spinner-gap-bold" className="animate-spin text-6xl text-emerald-500" />
-          <h2 className="mt-6 text-2xl font-bold">AI가 글자를 고치고 있어요</h2>
-          <p className="mt-3 flex items-center gap-2 text-xl font-semibold text-emerald-700 dark:text-emerald-300">
-            <Icon icon={AI_STEPS[Math.min(aiStep, AI_STEPS.length - 1)].icon} className="text-[24px]" />
-            {AI_STEPS[Math.min(aiStep, AI_STEPS.length - 1)].text}
-          </p>
-          <p className="mt-2 text-lg text-neutral-500 dark:text-neutral-400">30초쯤 걸려요. 잠시만 기다려 주세요.</p>
-          <div className="mt-5 flex gap-2">
-            {AI_STEPS.map((_, i) => (
-              <span key={i} className={`h-2.5 w-2.5 rounded-full ${i <= aiStep ? "bg-emerald-500" : "bg-neutral-200 dark:bg-neutral-700"}`} />
-            ))}
-          </div>
-        </div>
-      )}
-
       <ConfirmDialog
         open={leaveOpen}
         icon="ph:floppy-disk-duotone"
@@ -743,25 +688,83 @@ export default function Editor() {
         )}
       </div>
 
-      <div className="flex flex-1 items-center justify-center overflow-auto p-6">
-        <div
-          className="relative rounded-lg bg-white shadow-xl"
-          style={{
-            opacity: ready ? 1 : 0,
-            width: disp.w || undefined,
-            height: disp.h || undefined,
-            backgroundImage: bgUrl ? `url(${bgUrl})` : undefined,
-            backgroundSize: "100% 100%",
-          }}
-        >
-          <canvas ref={canvasEl} className="absolute inset-0" />
+      <div className="flex min-h-0 flex-1">
+        {/* 캔버스 영역 */}
+        <div className="flex min-w-0 flex-1 flex-col overflow-auto">
+          <div className="flex flex-1 items-center justify-center p-6">
+            <div
+              className="relative rounded-lg bg-white shadow-xl"
+              style={{
+                opacity: ready ? 1 : 0,
+                width: disp.w || undefined,
+                height: disp.h || undefined,
+                backgroundImage: bgUrl ? `url(${bgUrl})` : undefined,
+                backgroundSize: "100% 100%",
+              }}
+            >
+              <canvas ref={canvasEl} className="absolute inset-0" />
+            </div>
+          </div>
+          {!bgUrl && ready && (
+            <p className="pb-4 text-center text-base text-neutral-500">
+              편집할 그림이 없어요. 먼저 홍보물을 만든 뒤 "글자 수정 또는 추가"로 여세요.
+            </p>
+          )}
         </div>
+
+        {/* AI 글자 수정 — 우측 패널(이미지를 가리지 않도록) */}
+        {aiOpen && (
+          <aside className="flex w-80 shrink-0 flex-col overflow-y-auto border-l border-neutral-200 bg-white p-5 sm:w-96 dark:border-neutral-800 dark:bg-neutral-900">
+            <div className="flex items-center justify-between">
+              <h2 className="flex items-center gap-2 text-xl font-bold">
+                <Icon icon="ph:magic-wand-duotone" className="text-emerald-600 text-[24px]" />
+                AI로 글자 수정·추가
+              </h2>
+              <button onClick={() => !aiBusy && setAiOpen(false)} disabled={aiBusy} className="grid h-9 w-9 place-items-center rounded-lg text-neutral-500 hover:bg-neutral-100 disabled:opacity-40 dark:hover:bg-neutral-800">
+                <Icon icon="ph:x-bold" />
+              </button>
+            </div>
+
+            {aiBusy ? (
+              <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
+                <Icon icon="ph:spinner-gap-bold" className="animate-spin text-5xl text-emerald-500" />
+                <p className="mt-5 flex items-center gap-2 text-lg font-semibold text-emerald-700 dark:text-emerald-300">
+                  <Icon icon={AI_STEPS[Math.min(aiStep, AI_STEPS.length - 1)].icon} className="text-[22px]" />
+                  {AI_STEPS[Math.min(aiStep, AI_STEPS.length - 1)].text}
+                </p>
+                <p className="mt-2 text-base text-neutral-500 dark:text-neutral-400">30초쯤 걸려요. 잠시만 기다려 주세요.</p>
+                <div className="mt-4 flex gap-2">
+                  {AI_STEPS.map((_, i) => (
+                    <span key={i} className={`h-2.5 w-2.5 rounded-full ${i <= aiStep ? "bg-emerald-500" : "bg-neutral-200 dark:bg-neutral-700"}`} />
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <>
+                <p className="mt-1 text-base text-neutral-500 dark:text-neutral-400">
+                  어떤 글자를 어떻게 바꾸거나 더할지 적어 주세요. 지금 그림을 참고해 <b>새 페이지</b>로 만들어요.
+                </p>
+                <textarea
+                  autoFocus
+                  value={aiText}
+                  onChange={(e) => setAiText(e.target.value)}
+                  rows={6}
+                  placeholder={"예)\n'목적'을 '매물'로 바꿔줘\n맨 아래에 전화번호 010-1234-5678 추가해줘"}
+                  className="mt-4 w-full rounded-xl border-2 border-neutral-200 p-3 text-lg outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-800"
+                />
+                {aiMsg && <p className="mt-2 text-base text-red-600 dark:text-red-400">{aiMsg}</p>}
+                <button
+                  onClick={runAiEdit}
+                  disabled={!aiText.trim()}
+                  className={`${btn} mt-4 w-full justify-center bg-emerald-600 text-white hover:bg-emerald-500`}
+                >
+                  <Icon icon="ph:magic-wand-bold" /> AI로 수정하기
+                </button>
+              </>
+            )}
+          </aside>
+        )}
       </div>
-      {!bgUrl && ready && (
-        <p className="pb-4 text-center text-base text-neutral-500">
-          편집할 그림이 없어요. 먼저 홍보물을 만든 뒤 "글자 수정 또는 추가"로 여세요.
-        </p>
-      )}
     </div>
   );
 }
