@@ -82,14 +82,16 @@ test("편집기: AI로 글자 수정하면 template_id로 프로젝트를 갱신
   // AI로 글자 수정 → 기존 프로젝트(template_id) 갱신 요청
   await page.getByRole("button", { name: /AI로 글자 수정/ }).click();
   await expect(page.getByRole("heading", { name: "AI로 글자 수정 또는 추가" })).toBeVisible();
-  await page.getByPlaceholder(/봄맞이 30% 할인/).fill("여름 세일 시작");
+  await page.getByPlaceholder(/매물/).fill("여름 세일 시작");
   const aiReq = page.waitForRequest(
     (r) => r.url().endsWith("/api/generate") && r.method() === "POST" && r.postDataJSON()?.template_id === "t",
   );
   await page.getByRole("button", { name: /AI로 수정하기/ }).click();
   await aiReq;
   await expect(page.getByText(/AI가 글자를 수정했어요/)).toBeVisible({ timeout: 10_000 });
-  expect(String(sent.text_content)).toContain("여름 세일 시작");
+  // 입력은 '넣을 글자'가 아니라 '수정 지시'로 프롬프트에 담긴다
+  expect(String(sent.prompt)).toContain("여름 세일 시작");
+  expect(sent.text_content).toBeUndefined();
 });
 
 test("편집기: 변경 후 나가면 저장 확인 모달이 뜬다", async ({ page }) => {

@@ -25,6 +25,14 @@ function today(): string {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`;
 }
 
+// AI 글자 수정 중 표시할 상태(순환)
+const AI_STEPS = [
+  { icon: "ph:brain-duotone", text: "요청한 내용을 이해하는 중이에요" },
+  { icon: "ph:eye-duotone", text: "지금 그림을 살펴보는 중이에요" },
+  { icon: "ph:text-aa-duotone", text: "글자를 고치는 중이에요" },
+  { icon: "ph:sparkle-duotone", text: "자연스럽게 다듬는 중이에요" },
+];
+
 export default function Editor() {
   const nav = useNavigate();
   const loc = useLocation();
@@ -58,11 +66,20 @@ export default function Editor() {
   const [aiOpen, setAiOpen] = useState(false);
   const [aiText, setAiText] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
+  const [aiStep, setAiStep] = useState(0);
   const [aiMsg, setAiMsg] = useState("");
 
   useEffect(() => {
     listFolders().then(setFolders).catch(() => {});
   }, []);
+
+  // AI 수정 중 상태 메시지 순환
+  useEffect(() => {
+    if (!aiBusy) return;
+    setAiStep(0);
+    const t = setInterval(() => setAiStep((s) => Math.min(s + 1, AI_STEPS.length - 1)), 3500);
+    return () => clearInterval(t);
+  }, [aiBusy]);
 
   // AI로 이미지의 글자를 수정/추가 — 현재 이미지를 참고해 다시 생성하고 배경을 교체
   async function runAiEdit() {
@@ -82,20 +99,22 @@ export default function Editor() {
           refGenerationId = undefined; // 참고 없이 진행
         }
       }
+      // 입력을 '넣을 글자'가 아니라 '수정 지시'로 전달(text_content 미사용 → 그대로 박히지 않음)
       const r = await generate({
         prompt:
-          "참고 이미지와 똑같은 디자인·구도·색을 최대한 그대로 유지하면서, " +
-          "아래 한글 문구로 글자만 자연스럽게 바꾸거나 추가해줘. 없는 정보는 지어내지 마.",
+          "참고 이미지의 디자인·구도·색·배치와 나머지 글자는 그대로 두고, 아래 요청만 반영해줘. " +
+          "요청은 그림에 그대로 적는 글자가 아니라 '무엇을 어떻게 바꾸거나 더할지'에 대한 지시다. " +
+          `요청: "${aiText.trim()}". ` +
+          "요청에 없는 글자는 절대 바꾸지 말고, 화살표(→)나 지시문 자체를 그림에 쓰지 마. 없는 정보는 지어내지 마.",
         width: w,
         height: h,
         quality: st.quality || "medium",
         mode: "ai_text",
-        text_content: aiText.trim(),
         kind: st.kind,
         ref_generation_id: refGenerationId,
         ref_upload_id: refUploadId,
         template_id: st.templateId,
-        similarity: 3,
+        similarity: 4,
       });
       // 새 이미지를 배경으로 교체(원본 해상도 합성용 이미지도 갱신)
       const el = new Image();
@@ -443,14 +462,14 @@ export default function Editor() {
               AI로 글자 수정 또는 추가
             </h2>
             <p className="mt-1 text-base text-neutral-500 dark:text-neutral-400">
-              AI로 수정될 문구, 추가할 문구를 입력해 주세요. 지금 그림과 비슷하게 다시 만들어요.
+              어떤 글자를 어떻게 바꾸거나 더할지 적어 주세요. 지금 그림을 참고해 그 부분만 다시 만들어요.
             </p>
             <textarea
               autoFocus
               value={aiText}
               onChange={(e) => setAiText(e.target.value)}
               rows={5}
-              placeholder={"예)\n봄맞이 30% 할인\n3월 한 달간"}
+              placeholder={"예)\n'목적'을 '매물'로 바꿔줘\n맨 아래에 전화번호 010-1234-5678 추가해줘"}
               className="mt-4 w-full rounded-xl border-2 border-neutral-200 p-3 text-lg outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-800"
             />
             {aiMsg && <p className="mt-2 text-base text-red-600 dark:text-red-400">{aiMsg}</p>}
@@ -467,6 +486,24 @@ export default function Editor() {
                 취소
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI 수정 진행 중 — 이미지 생성처럼 상태 텍스트 표시 */}
+      {aiBusy && (
+        <div className="fixed inset-0 z-[60] flex flex-col items-center justify-center bg-white/90 text-center dark:bg-neutral-950/90">
+          <Icon icon="ph:spinner-gap-bold" className="animate-spin text-6xl text-emerald-500" />
+          <h2 className="mt-6 text-2xl font-bold">AI가 글자를 고치고 있어요</h2>
+          <p className="mt-3 flex items-center gap-2 text-xl font-semibold text-emerald-700 dark:text-emerald-300">
+            <Icon icon={AI_STEPS[Math.min(aiStep, AI_STEPS.length - 1)].icon} className="text-[24px]" />
+            {AI_STEPS[Math.min(aiStep, AI_STEPS.length - 1)].text}
+          </p>
+          <p className="mt-2 text-lg text-neutral-500 dark:text-neutral-400">30초쯤 걸려요. 잠시만 기다려 주세요.</p>
+          <div className="mt-5 flex gap-2">
+            {AI_STEPS.map((_, i) => (
+              <span key={i} className={`h-2.5 w-2.5 rounded-full ${i <= aiStep ? "bg-emerald-500" : "bg-neutral-200 dark:bg-neutral-700"}`} />
+            ))}
           </div>
         </div>
       )}
