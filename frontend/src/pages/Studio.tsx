@@ -468,16 +468,14 @@ export default function Studio() {
               <label htmlFor="desc" className="text-lg font-semibold">
                 만들고 싶은 그림 설명
               </label>
-              {getRecentPrompts().length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setShowRecentPrompts(true)}
-                  className="flex h-9 items-center gap-1.5 rounded-full border-2 border-neutral-200 px-3 text-sm font-semibold text-neutral-600 hover:border-emerald-400 hover:bg-emerald-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-emerald-950/30"
-                >
-                  <Icon icon="ph:clock-counter-clockwise-duotone" className="text-emerald-600" />
-                  최근 입력
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => setShowRecentPrompts(true)}
+                className="ml-auto flex h-9 items-center gap-1.5 rounded-full border-2 border-neutral-200 px-3 text-sm font-semibold text-neutral-600 hover:border-emerald-400 hover:bg-emerald-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-emerald-950/30"
+              >
+                <Icon icon="ph:clock-counter-clockwise-duotone" className="text-emerald-600" />
+                최근 입력
+              </button>
             </div>
             <textarea
               id="desc"
@@ -621,22 +619,28 @@ export default function Studio() {
           icon="ph:clock-counter-clockwise-duotone"
           onClose={() => setShowRecentPrompts(false)}
         >
-          <ul className="flex flex-col gap-2">
-            {getRecentPrompts().map((p, i) => (
-              <li key={i}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDescription(p);
-                    setShowRecentPrompts(false);
-                  }}
-                  className="w-full rounded-2xl border-2 border-neutral-200 px-4 py-3 text-left text-base hover:border-emerald-400 hover:bg-emerald-50 dark:border-neutral-700 dark:hover:bg-emerald-950/30"
-                >
-                  {p}
-                </button>
-              </li>
-            ))}
-          </ul>
+          {getRecentPrompts().length === 0 ? (
+            <p className="rounded-2xl border-2 border-dashed border-neutral-200 px-4 py-8 text-center text-base text-neutral-400 dark:border-neutral-800">
+              아직 저장된 설명이 없어요. 홍보물을 한 번 만들면 여기에 쌓여요.
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {getRecentPrompts().map((p, i) => (
+                <li key={i}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDescription(p);
+                      setShowRecentPrompts(false);
+                    }}
+                    className="w-full rounded-2xl border-2 border-neutral-200 px-4 py-3 text-left text-base hover:border-emerald-400 hover:bg-emerald-50 dark:border-neutral-700 dark:hover:bg-emerald-950/30"
+                  >
+                    {p}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </PickerModal>
       )}
 
