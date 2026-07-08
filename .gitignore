@@ -4,3 +4,7 @@ dist/
 __pycache__/
 *.pyc
 .venv/
+
+# Playwright 산출물(백엔드 폴더에서 잘못 실행된 경우)
+backend/test-results/
+backend/playwright-report/
