@@ -1,10 +1,13 @@
 # ai_create — 프론트 빌드 + 백엔드 런타임 단일 이미지 (Render 무료 웹서비스)
 
 # --- 1) 프론트엔드 빌드 ---
-FROM node:24-alpine AS frontend
+# node:24-slim(glibc). lockfile에 플랫폼별 rollup/esbuild 네이티브 바이너리가
+# 없어(Windows에서 생성) npm ci가 실패하므로, 리눅스 기준으로 새로 resolve하도록
+# package.json만 복사해 npm install 한다.
+FROM node:24-slim AS frontend
 WORKDIR /fe
-COPY frontend/package*.json ./
-RUN npm ci
+COPY frontend/package.json ./
+RUN npm install --no-audit --no-fund
 COPY frontend/ ./
 RUN npm run build
 
