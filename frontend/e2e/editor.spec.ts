@@ -102,6 +102,43 @@ test("편집기: AI로 글자 수정하면 template_id로 새 페이지를 추�
   expect(sent.text_content).toBeUndefined();
 });
 
+test("편집기: AI 사이즈 수정 시 입력한 새 크기로 생성된다", async ({ page }) => {
+  await login(page);
+  await page.route("**/api/refs/upload", (r) =>
+    r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ref_upload_id: "ref1" }) }),
+  );
+  await page.route("**/api/templates/*/pages", (r) =>
+    r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) }),
+  );
+  await page.route("**/api/generate", (route) => {
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ generation_id: "g2", project_id: "t", project_name: "제목", page_id: "pg2", image_url: FAKE_PNG, thumb_url: FAKE_PNG, size: "800x1200", cost_krw: 10, remaining_krw: null }) });
+  });
+
+  await page.getByRole("button", { name: /새 홍보물 만들기/ }).click();
+  await page.getByRole("button", { name: /배너/ }).first().click();
+  await page.getByRole("button", { name: "음식점" }).click();
+  await page.getByRole("button", { name: /보통 \(추천\)/ }).click();
+  await page.getByRole("button", { name: "다음", exact: true }).click();
+  await page.getByLabel("만들고 싶은 그림 설명").fill("테스트");
+  await page.getByRole("button", { name: "다음", exact: true }).click();
+  await page.getByRole("button", { name: "만들기", exact: true }).click();
+  await page.getByRole("button", { name: /글자 수정 또는 추가/ }).click();
+  await expect(page).toHaveURL(/\/editor$/);
+
+  // 글자 입력 없이 사이즈만 변경
+  await page.getByRole("button", { name: /AI로 수정/ }).click();
+  await page.getByRole("button", { name: "사이즈 수정" }).click();
+  const nums = page.getByRole("spinbutton");
+  await nums.nth(0).fill("800");
+  await nums.nth(1).fill("1200");
+  const req = page.waitForRequest(
+    (r) => r.url().endsWith("/api/generate") && r.method() === "POST" && r.postDataJSON()?.width === 800 && r.postDataJSON()?.height === 1200,
+  );
+  await page.getByRole("button", { name: /AI로 수정하기/ }).click();
+  await req;
+  await expect(page.getByText(/AI가 새 페이지를 만들었어요/)).toBeVisible({ timeout: 10_000 });
+});
+
 test("편집기: 변경 후 나가면 저장 확인 모달이 뜬다", async ({ page }) => {
   await login(page);
   await page.route("**/api/templates/*", (r) => r.fulfill({ status: 200, contentType: "application/json", body: "{}" }));

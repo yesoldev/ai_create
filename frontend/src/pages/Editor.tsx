@@ -110,6 +110,10 @@ export default function Editor() {
   const [aiStep, setAiStep] = useState(0);
   const [aiMsg, setAiMsg] = useState("");
   const [remaining, setRemaining] = useState<number | null | undefined>(undefined); // 이번 달 잔액
+  // AI로 크기 변경 (px) — '사이즈 수정' 눌렀을 때만 입력·적용
+  const [sizeEdit, setSizeEdit] = useState(false);
+  const [aiW, setAiW] = useState(0);
+  const [aiH, setAiH] = useState(0);
 
   useEffect(() => {
     listFolders().then(setFolders).catch(() => {});
@@ -460,11 +464,15 @@ export default function Editor() {
 
   // AI로 이미지의 글자를 수정/추가 — 현재 페이지를 참고해 '새 페이지'로 추가
   async function runAiEdit() {
-    if (!aiText.trim() || aiBusy) return;
+    const cur = natSize.current;
+    // 사이즈 수정이 켜지고 값이 입력됐을 때만 크기 변경 적용
+    const targetW = sizeEdit && aiW > 0 ? Math.round(aiW) : cur.w;
+    const targetH = sizeEdit && aiH > 0 ? Math.round(aiH) : cur.h;
+    const sizeChanged = targetW !== cur.w || targetH !== cur.h;
+    if ((!aiText.trim() && !sizeChanged) || aiBusy) return;
     setAiBusy(true);
     setAiMsg("");
     try {
-      const { w, h } = natSize.current;
       // 현재 페이지 이미지를 참고로 업로드(디자인 유지)
       let refUploadId: string | undefined;
       if (bgUrl) {
@@ -475,14 +483,22 @@ export default function Editor() {
           refUploadId = undefined;
         }
       }
+      // 요청/크기 유무에 따라 프롬프트 구성
+      let prompt = "이 참고 이미지를 바탕으로 다시 만들어줘. 원래 디자인·구도·색·내용을 최대한 그대로 유지해.";
+      if (aiText.trim()) {
+        prompt +=
+          ` 아래 요청만 반영해: "${aiText.trim()}". ` +
+          "요청은 그림에 그대로 적는 글자가 아니라 '무엇을 어떻게 바꾸거나 더할지'에 대한 지시다. 화살표(→)나 지시문 자체를 그림에 쓰지 마.";
+      }
+      if (sizeChanged) {
+        prompt += ` 이미지 크기를 ${targetW}x${targetH} 픽셀로 바꾸되, 원래 디자인과 내용을 유지하며 새 크기·비율에 자연스럽게 다시 배치해줘.`;
+      }
+      prompt += " 없는 정보는 지어내지 마.";
+
       const r = await generate({
-        prompt:
-          "이 참고 이미지를 바탕으로, 아래 요청만 반영해서 수정해줘. 요청과 관계없는 부분(디자인·구도·색·배치·나머지 글자)은 그대로 유지해. " +
-          "요청은 그림에 그대로 적는 글자가 아니라 '무엇을 어떻게 바꾸거나 더할지'에 대한 지시다. " +
-          `요청: "${aiText.trim()}". ` +
-          "화살표(→)나 지시문 자체를 그림에 쓰지 말고, 없는 정보는 지어내지 마.",
-        width: w,
-        height: h,
+        prompt,
+        width: targetW,
+        height: targetH,
         quality: st.quality || "medium",
         mode: "ai_text",
         kind: st.kind,
@@ -617,7 +633,16 @@ export default function Editor() {
           <button onClick={goLibrary} className={`${btn} border-2 border-neutral-200 text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800`}>
             <Icon icon="ph:folders-bold" /> 보관함 이동
           </button>
-          <button onClick={() => { setAiMsg(""); setAiOpen(true); }} className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}>
+          <button
+            onClick={() => {
+              setAiMsg("");
+              setSizeEdit(false);
+              setAiW(natSize.current.w);
+              setAiH(natSize.current.h);
+              setAiOpen(true);
+            }}
+            className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
+          >
             <Icon icon="ph:magic-wand-bold" /> AI로 수정
           </button>
           <button onClick={() => save("png")} className={`${btn} bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-200`}>
@@ -831,10 +856,52 @@ export default function Editor() {
                   placeholder={"예)\n'목적'을 '매물'로 바꿔줘\n배경을 더 밝은 파란색으로\n맨 아래에 전화번호 010-1234-5678 추가해줘"}
                   className="mt-4 w-full rounded-xl border-2 border-neutral-200 p-3 text-lg outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-800"
                 />
+                {/* 사이즈 수정 — 누르면 입력칸 표시, 입력해 현재와 다를 때만 적용 */}
+                <button
+                  type="button"
+                  onClick={() => setSizeEdit((v) => !v)}
+                  className={`mt-4 flex h-11 w-full items-center justify-center gap-1.5 rounded-xl border-2 text-base font-semibold transition ${
+                    sizeEdit
+                      ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300"
+                      : "border-neutral-200 text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                  }`}
+                >
+                  <Icon icon="ph:frame-corners-bold" /> 사이즈 수정
+                </button>
+                {sizeEdit && (
+                  <div className="mt-2">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min={16}
+                        max={3840}
+                        value={aiW || ""}
+                        onChange={(e) => setAiW(Number(e.target.value))}
+                        className="h-11 w-24 rounded-xl border-2 border-neutral-200 px-3 text-lg outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-800"
+                      />
+                      <span className="text-lg text-neutral-400">×</span>
+                      <input
+                        type="number"
+                        min={16}
+                        max={3840}
+                        value={aiH || ""}
+                        onChange={(e) => setAiH(Number(e.target.value))}
+                        className="h-11 w-24 rounded-xl border-2 border-neutral-200 px-3 text-lg outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-800"
+                      />
+                      <span className="text-lg text-neutral-500">px</span>
+                    </div>
+                    <p className="mt-1 text-sm text-neutral-400">
+                      지금 {natSize.current.w}×{natSize.current.h}px · 비율이 크게 달라지면 배치가 바뀔 수 있어요
+                    </p>
+                  </div>
+                )}
                 {aiMsg && <p className="mt-2 text-base text-red-600 dark:text-red-400">{aiMsg}</p>}
                 <button
                   onClick={runAiEdit}
-                  disabled={!aiText.trim()}
+                  disabled={
+                    !aiText.trim() &&
+                    !(sizeEdit && aiW > 0 && aiH > 0 && (aiW !== natSize.current.w || aiH !== natSize.current.h))
+                  }
                   className={`${btn} mt-4 w-full justify-center bg-emerald-600 text-white hover:bg-emerald-500`}
                 >
                   <Icon icon="ph:magic-wand-bold" /> AI로 수정하기
