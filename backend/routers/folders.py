@@ -15,7 +15,8 @@ async def tree(user: dict = Depends(get_current_user)):
     with get_conn() as conn:
         rows = conn.execute(
             "select id, parent_id, name, sort_order from public.folders "
-            "order by sort_order, name"
+            "where created_by=%s order by sort_order, name",
+            (user["id"],),
         ).fetchall()
     return {"items": rows}
 
@@ -52,10 +53,10 @@ async def update(fid: str, body: FolderPatch, user: dict = Depends(get_current_u
         params.append(body.parent_id)
     if not sets:
         raise HTTPException(400, "변경할 내용이 없습니다.")
-    params.append(fid)
+    params.extend([fid, user["id"]])
     with get_conn() as conn:
         row = conn.execute(
-            f"update public.folders set {', '.join(sets)} where id=%s "
+            f"update public.folders set {', '.join(sets)} where id=%s and created_by=%s "
             "returning id, parent_id, name, sort_order",
             params,
         ).fetchone()
@@ -67,6 +68,11 @@ async def update(fid: str, body: FolderPatch, user: dict = Depends(get_current_u
 @router.delete("/{fid}")
 async def delete(fid: str, force: bool = Query(False), user: dict = Depends(get_current_user)):
     with get_conn() as conn:
+        owner = conn.execute(
+            "select 1 from public.folders where id=%s and created_by=%s", (fid, user["id"])
+        ).fetchone()
+        if not owner:
+            raise HTTPException(404, "폴더를 찾을 수 없습니다.")
         n_sub = conn.execute(
             "select count(*) as n from public.folders where parent_id=%s", (fid,)
         ).fetchone()["n"]
@@ -77,5 +83,5 @@ async def delete(fid: str, force: bool = Query(False), user: dict = Depends(get_
             raise HTTPException(
                 409, f"폴더에 하위 항목이 있습니다(하위폴더 {n_sub}, 템플릿 {n_tpl}). 확인 후 재요청."
             )
-        conn.execute("delete from public.folders where id=%s", (fid,))
+        conn.execute("delete from public.folders where id=%s and created_by=%s", (fid, user["id"]))
     return {"ok": True}

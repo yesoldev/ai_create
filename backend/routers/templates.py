@@ -23,13 +23,14 @@ async def list_templates(folder_id: str | None = Query(None), user: dict = Depen
         if folder_id:
             rows = conn.execute(
                 "select id, folder_id, name, size_w, size_h, dpi, thumb_path, updated_at "
-                "from public.templates where folder_id=%s order by updated_at desc",
-                (folder_id,),
+                "from public.templates where folder_id=%s and created_by=%s order by updated_at desc",
+                (folder_id, user["id"]),
             ).fetchall()
         else:
             rows = conn.execute(
                 "select id, folder_id, name, size_w, size_h, dpi, thumb_path, updated_at "
-                "from public.templates order by updated_at desc limit 100"
+                "from public.templates where created_by=%s order by updated_at desc limit 100",
+                (user["id"],),
             ).fetchall()
     return {"items": [_with_thumb(r) for r in rows]}
 
@@ -82,7 +83,9 @@ async def get_template(tid: str, user: dict = Depends(get_current_user)):
     import asyncio
 
     with get_conn() as conn:
-        row = conn.execute("select * from public.templates where id=%s", (tid,)).fetchone()
+        row = conn.execute(
+            "select * from public.templates where id=%s and created_by=%s", (tid, user["id"])
+        ).fetchone()
         if not row:
             raise HTTPException(404, "템플릿을 찾을 수 없습니다.")
         pages = conn.execute(
@@ -157,10 +160,11 @@ async def update(tid: str, body: TemplatePatch, user: dict = Depends(get_current
         params.append(body.size_h)
     if not sets:
         raise HTTPException(400, "변경할 내용이 없습니다.")
-    params.append(tid)
+    params.extend([tid, user["id"]])
     with get_conn() as conn:
         row = conn.execute(
-            f"update public.templates set {', '.join(sets)} where id=%s returning id", params
+            f"update public.templates set {', '.join(sets)} where id=%s and created_by=%s returning id",
+            params,
         ).fetchone()
     if not row:
         raise HTTPException(404, "템플릿을 찾을 수 없습니다.")
@@ -221,8 +225,8 @@ async def copy(tid: str, user: dict = Depends(get_current_user)):
             "insert into public.templates "
             "(folder_id, name, canvas_json, prompt, size_w, size_h, dpi, bg_image_path, thumb_path, created_by) "
             "select folder_id, name || ' (복사본)', canvas_json, prompt, size_w, size_h, dpi, "
-            "bg_image_path, thumb_path, %s from public.templates where id=%s returning id",
-            (user["id"], tid),
+            "bg_image_path, thumb_path, %s from public.templates where id=%s and created_by=%s returning id",
+            (user["id"], tid, user["id"]),
         ).fetchone()
     if not row:
         raise HTTPException(404, "템플릿을 찾을 수 없습니다.")
@@ -232,5 +236,5 @@ async def copy(tid: str, user: dict = Depends(get_current_user)):
 @router.delete("/{tid}")
 async def delete(tid: str, user: dict = Depends(get_current_user)):
     with get_conn() as conn:
-        conn.execute("delete from public.templates where id=%s", (tid,))
+        conn.execute("delete from public.templates where id=%s and created_by=%s", (tid, user["id"]))
     return {"ok": True}
