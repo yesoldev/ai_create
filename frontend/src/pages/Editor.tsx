@@ -102,7 +102,11 @@ export default function Editor() {
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [lastSaved, setLastSaved] = useState<string>(""); // 마지막 저장 시각 표시
   const [delPageOpen, setDelPageOpen] = useState(false); // 페이지 삭제 확인
+  const [moveOpen, setMoveOpen] = useState(false); // 폴더 이동
+  const [moveFolderId, setMoveFolderId] = useState("");
+  const [moving, setMoving] = useState(false);
   const saveDismiss = useDismiss(() => setShowSave(false));
+  const moveDismiss = useDismiss(() => !moving && setMoveOpen(false));
   // AI로 글자 수정/추가
   const [aiOpen, setAiOpen] = useState(false);
   const [aiText, setAiText] = useState("");
@@ -576,23 +580,33 @@ export default function Editor() {
     }
   }
 
-  const leaveToRef = useRef<number | string>(-1);
   function tryLeave() {
-    leaveToRef.current = -1;
     if (dirty) setLeaveOpen(true);
     else nav(-1);
-  }
-  function goLibrary() {
-    leaveToRef.current = "/library";
-    if (dirty) setLeaveOpen(true);
-    else nav("/library");
   }
   function doLeave() {
     setLeaveOpen(false);
     setDirty(false);
-    const t = leaveToRef.current;
-    if (typeof t === "number") nav(t);
-    else nav(t);
+    nav(-1);
+  }
+
+  // 폴더 이동
+  async function doMoveFolder() {
+    if (!st.templateId) {
+      setMoveOpen(false);
+      return;
+    }
+    setMoving(true);
+    try {
+      await updateTemplate(st.templateId, { folder_id: moveFolderId || null, move_to_root: !moveFolderId });
+      setFolderId(moveFolderId);
+      setMoveOpen(false);
+      setSaveMsg("폴더를 옮겼어요.");
+    } catch {
+      setSaveMsg("폴더 이동에 실패했어요. 다시 시도해 주세요.");
+    } finally {
+      setMoving(false);
+    }
   }
   async function saveThenLeave() {
     syncActive();
@@ -630,8 +644,15 @@ export default function Editor() {
           <button onClick={() => setShowSave(true)} className={`${btn} border-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/30`}>
             <Icon icon="ph:floppy-disk-bold" /> 보관함에 저장
           </button>
-          <button onClick={goLibrary} className={`${btn} border-2 border-neutral-200 text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800`}>
-            <Icon icon="ph:folders-bold" /> 보관함 이동
+          <button
+            onClick={() => {
+              if (!st.templateId) { setShowSave(true); return; }
+              setMoveFolderId(folderId);
+              setMoveOpen(true);
+            }}
+            className={`${btn} border-2 border-neutral-200 text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800`}
+          >
+            <Icon icon="ph:folder-simple-bold" /> 폴더 이동
           </button>
           <button
             onClick={() => {
@@ -697,6 +718,39 @@ export default function Editor() {
           { label: "취소", tone: "soft", onClick: () => setDelPageOpen(false) },
         ]}
       />
+
+      {moveOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" {...moveDismiss}>
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl dark:bg-neutral-900">
+            <h2 className="flex items-center gap-2 text-xl font-bold">
+              <Icon icon="ph:folder-simple-duotone" className="text-emerald-600 text-[24px]" />
+              폴더 이동
+            </h2>
+            <p className="mt-1 text-base text-neutral-500 dark:text-neutral-400">이 프로젝트를 옮길 폴더를 골라 주세요.</p>
+            <select
+              value={moveFolderId}
+              onChange={(e) => setMoveFolderId(e.target.value)}
+              className="mt-4 h-12 w-full rounded-xl border-2 border-neutral-200 px-3 text-lg outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-800"
+            >
+              <option value="">폴더 없음</option>
+              {withDepth(folders).map((f) => (
+                <option key={f.id} value={f.id}>
+                  {" ".repeat(f.depth * 2)}
+                  {f.name}
+                </option>
+              ))}
+            </select>
+            <div className="mt-5 flex gap-2">
+              <button onClick={doMoveFolder} disabled={moving} className={`${btn} flex-1 justify-center bg-emerald-600 text-white hover:bg-emerald-500`}>
+                <Icon icon="ph:check-bold" /> {moving ? "옮기는 중..." : "옮기기"}
+              </button>
+              <button onClick={() => setMoveOpen(false)} disabled={moving} className={`${btn} justify-center border-2 border-neutral-200 dark:border-neutral-700`}>
+                취소
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showSave && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" {...saveDismiss}>
