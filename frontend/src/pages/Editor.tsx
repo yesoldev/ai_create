@@ -560,14 +560,23 @@ export default function Editor() {
     }
   }
 
+  const leaveToRef = useRef<number | string>(-1);
   function tryLeave() {
+    leaveToRef.current = -1;
     if (dirty) setLeaveOpen(true);
     else nav(-1);
+  }
+  function goLibrary() {
+    leaveToRef.current = "/library";
+    if (dirty) setLeaveOpen(true);
+    else nav("/library");
   }
   function doLeave() {
     setLeaveOpen(false);
     setDirty(false);
-    nav(-1);
+    const t = leaveToRef.current;
+    if (typeof t === "number") nav(t);
+    else nav(t);
   }
   async function saveThenLeave() {
     syncActive();
@@ -604,6 +613,9 @@ export default function Editor() {
           {lastSaved && <span className="text-xs text-neutral-400">마지막 저장 {lastSaved}</span>}
           <button onClick={() => setShowSave(true)} className={`${btn} border-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/30`}>
             <Icon icon="ph:floppy-disk-bold" /> 보관함에 저장
+          </button>
+          <button onClick={goLibrary} className={`${btn} border-2 border-neutral-200 text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800`}>
+            <Icon icon="ph:folders-bold" /> 보관함 이동
           </button>
           <button onClick={() => { setAiMsg(""); setAiOpen(true); }} className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}>
             <Icon icon="ph:magic-wand-bold" /> AI로 수정

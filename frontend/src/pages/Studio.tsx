@@ -9,6 +9,7 @@ import {
   COLORS,
   NEWSPAPER_HINT,
   FLYER_HINT,
+  fetchDefaultSizes,
   toPx,
   fetchEstimate,
   generate,
@@ -86,6 +87,16 @@ export default function Studio() {
   const [regenOpen, setRegenOpen] = useState(false);
   const [regenText, setRegenText] = useState("");
 
+  // 관리자 설정 기본 사이즈 → 종류별 첫 번째(추천) 옵션으로
+  const [adminSizes, setAdminSizes] = useState<{ banner: { w: number; h: number }; flyer: { w: number; h: number } } | null>(null);
+  function sizeOptions(k: Kind): SizePreset[] {
+    const base = SIZES[k];
+    if (!adminSizes) return base;
+    const d = adminSizes[k];
+    const def: SizePreset = { key: "admin_default", label: "기본 크기", w: d.w, h: d.h, hint: "추천" };
+    return [def, ...base.filter((s) => !(s.w === d.w && s.h === d.h))];
+  }
+
   useEffect(() => {
     listGenerations()
       .then(setRecentGens)
@@ -93,6 +104,9 @@ export default function Studio() {
     listFolders()
       .then(setFolders)
       .catch(() => setFolders([]));
+    fetchDefaultSizes()
+      .then(setAdminSizes)
+      .catch(() => setAdminSizes(null));
   }, []);
 
   const [copyMsg, setCopyMsg] = useState("");
@@ -168,7 +182,7 @@ export default function Studio() {
 
   function pickKind(k: Kind) {
     setKind(k);
-    setSize(SIZES[k][0]);
+    setSize(sizeOptions(k)[0]);
     setCustom(false);
     setStep(2);
   }
@@ -559,7 +573,7 @@ export default function Studio() {
           <Section title="크기와 품질을 골라요" desc="잘 모르면 추천된 것을 그대로 두세요.">
             <p className="mb-2 text-lg font-semibold">크기</p>
             <div className="grid gap-3 sm:grid-cols-2">
-              {SIZES[kind].map((s) => (
+              {sizeOptions(kind).map((s) => (
                 <ChoiceCard
                   key={s.key}
                   active={!custom && size?.key === s.key}

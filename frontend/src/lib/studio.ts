@@ -20,6 +20,24 @@ export const SIZES: Record<"banner" | "flyer", SizePreset[]> = {
   ],
 };
 
+// 관리자 설정 기본 사이즈 (배너/전단지) — /api/settings/default-sizes
+export interface DefaultSizes {
+  banner: { w: number; h: number };
+  flyer: { w: number; h: number };
+}
+export async function fetchDefaultSizes(): Promise<DefaultSizes> {
+  const { data } = await api.get<DefaultSizes>("/api/settings/default-sizes");
+  return data;
+}
+export async function saveDefaultSizes(v: {
+  banner_w: number;
+  banner_h: number;
+  flyer_w: number;
+  flyer_h: number;
+}): Promise<void> {
+  await api.patch("/api/settings/default-sizes", v);
+}
+
 // 딸깍 빠른 시작 — 용도별 설명 자동 채우기(초보 사용자 배려)
 export interface QuickStart {
   key: string;

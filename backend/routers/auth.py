@@ -39,6 +39,33 @@ async def login(body: LoginBody):
     }
 
 
+class RefreshBody(BaseModel):
+    refresh_token: str
+
+
+@router.post("/refresh")
+async def refresh(body: RefreshBody):
+    """refresh_token 으로 새 세션 토큰 발급(로그인 유지)."""
+    url = f"{settings.auth_url}/token?grant_type=refresh_token"
+    async with httpx.AsyncClient(timeout=20) as c:
+        r = await c.post(
+            url,
+            json={"refresh_token": body.refresh_token},
+            headers={
+                "apikey": settings.SUPABASE_PUBLISHABLE_KEY,
+                "Content-Type": "application/json",
+            },
+        )
+    if r.status_code != 200:
+        raise HTTPException(status_code=401, detail="세션이 만료되었습니다. 다시 로그인해 주세요.")
+    data = r.json()
+    return {
+        "access_token": data["access_token"],
+        "refresh_token": data.get("refresh_token"),
+        "expires_at": data.get("expires_at"),
+    }
+
+
 @router.get("/me")
 async def me(user: dict = Depends(get_current_user)):
     return user

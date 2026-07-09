@@ -5,7 +5,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { api, getToken, setToken } from "./api";
+import { api, getToken, getRefresh, setToken, setRefresh, setSession } from "./api";
 
 export interface User {
   id: string;
@@ -29,7 +29,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   async function loadMe() {
-    if (!getToken()) {
+    // 토큰이 없어도 refresh_token 있으면 인터셉터가 자동 갱신 시도
+    if (!getToken() && !getRefresh()) {
       setLoading(false);
       return;
     }
@@ -38,6 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(data);
     } catch {
       setToken(null);
+      setRefresh(null);
     } finally {
       setLoading(false);
     }
@@ -49,13 +51,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function login(email: string, password: string) {
     const { data } = await api.post("/api/auth/login", { email, password });
-    setToken(data.access_token);
+    setSession(data.access_token, data.refresh_token ?? null);
     const me = await api.get<User>("/api/auth/me");
     setUser(me.data);
   }
 
   function logout() {
-    setToken(null);
+    setSession(null, null);
     setUser(null);
   }
 

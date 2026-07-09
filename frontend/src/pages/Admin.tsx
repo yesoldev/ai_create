@@ -1,8 +1,8 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type ChangeEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@iconify/react";
 import { listUsers, createUser, patchUser, type AdminUser } from "../lib/admin";
-import { krw } from "../lib/studio";
+import { krw, fetchDefaultSizes, saveDefaultSizes } from "../lib/studio";
 
 export default function Admin() {
   const nav = useNavigate();
@@ -65,13 +65,77 @@ export default function Admin() {
           />
         )}
 
-        <div className="mt-6 space-y-3">
+        <DefaultSizesCard onError={setMsg} onOk={setMsg} />
+
+        <h2 className="mt-8 mb-3 text-xl font-bold">계정 목록</h2>
+        <div className="space-y-3">
           {users.map((u) => (
             <UserRow key={u.id} u={u} onChange={load} onError={setMsg} />
           ))}
         </div>
       </main>
     </div>
+  );
+}
+
+function DefaultSizesCard({ onError, onOk }: { onError: (m: string) => void; onOk: (m: string) => void }) {
+  const [v, setV] = useState({ banner_w: 1024, banner_h: 400, flyer_w: 900, flyer_h: 1500 });
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    fetchDefaultSizes()
+      .then((d) => setV({ banner_w: d.banner.w, banner_h: d.banner.h, flyer_w: d.flyer.w, flyer_h: d.flyer.h }))
+      .catch(() => {});
+  }, []);
+
+  async function save() {
+    setBusy(true);
+    try {
+      await saveDefaultSizes(v);
+      onOk("기본 크기를 저장했습니다. (새로 만들기부터 적용)");
+    } catch {
+      onError("기본 크기 저장에 실패했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const num = "h-11 w-24 rounded-lg border-2 border-neutral-200 px-3 text-base outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-900";
+  const upd = (k: keyof typeof v) => (e: ChangeEvent<HTMLInputElement>) => setV((p) => ({ ...p, [k]: Number(e.target.value) }));
+
+  return (
+    <section className="mt-8 rounded-2xl border-2 border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
+      <h2 className="flex items-center gap-2 text-xl font-bold">
+        <Icon icon="ph:frame-corners-duotone" className="text-emerald-600 text-[24px]" />
+        기본 크기 설정
+      </h2>
+      <p className="mt-1 text-base text-neutral-500 dark:text-neutral-400">
+        홍보물 만들기에서 종류를 고르면 이 크기가 추천(기본)으로 선택돼요. (단위: px)
+      </p>
+      <div className="mt-4 flex flex-wrap gap-6">
+        <div>
+          <p className="mb-1 font-semibold">배너</p>
+          <div className="flex items-center gap-2">
+            <input type="number" value={v.banner_w} onChange={upd("banner_w")} className={num} />
+            <span className="text-neutral-400">×</span>
+            <input type="number" value={v.banner_h} onChange={upd("banner_h")} className={num} />
+          </div>
+        </div>
+        <div>
+          <p className="mb-1 font-semibold">전단지</p>
+          <div className="flex items-center gap-2">
+            <input type="number" value={v.flyer_w} onChange={upd("flyer_w")} className={num} />
+            <span className="text-neutral-400">×</span>
+            <input type="number" value={v.flyer_h} onChange={upd("flyer_h")} className={num} />
+          </div>
+        </div>
+        <div className="flex items-end">
+          <button onClick={save} disabled={busy} className="flex h-11 items-center gap-2 rounded-xl bg-emerald-600 px-5 text-base font-bold text-white hover:bg-emerald-500 disabled:opacity-50">
+            <Icon icon="ph:check-bold" /> {busy ? "저장 중..." : "저장"}
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }
 
