@@ -601,15 +601,13 @@ export default function Editor() {
           <Icon icon="ph:pencil-simple-duotone" className="text-emerald-600 text-[20px]" /> 편집기
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {lastSaved && <span className="text-xs text-neutral-400">마지막 저장 {lastSaved}</span>}
+          <button onClick={() => setShowSave(true)} className={`${btn} border-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/30`}>
+            <Icon icon="ph:floppy-disk-bold" /> 보관함에 저장
+          </button>
           <button onClick={() => { setAiMsg(""); setAiOpen(true); }} className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}>
             <Icon icon="ph:magic-wand-bold" /> AI로 수정
           </button>
-          <div className="flex flex-col items-start">
-            <button onClick={() => setShowSave(true)} className={`${btn} border-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/30`}>
-              <Icon icon="ph:floppy-disk-bold" /> 보관함에 저장
-            </button>
-            {lastSaved && <span className="mt-0.5 pl-1 text-xs text-neutral-400">마지막 저장 {lastSaved}</span>}
-          </div>
           <button onClick={() => save("png")} className={`${btn} bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-200`}>
             <Icon icon="ph:download-simple-bold" /> PNG
           </button>
