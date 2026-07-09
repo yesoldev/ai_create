@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 import { krw, downloadImage } from "../lib/studio";
 import { useAuth } from "../lib/auth";
 import { listTemplates, getTemplate, type TemplateListItem } from "../lib/library";
+import { useDismiss } from "../components/dialogs";
 
 interface Usage {
   monthly_limit_krw: number | null;
@@ -28,6 +29,7 @@ export default function Home() {
   const [gens, setGens] = useState<Gen[]>([]);
   const [opening, setOpening] = useState(false);
   const [picked, setPicked] = useState<Gen | null>(null); // 최근 만든 것 클릭 시 다운로드/편집
+  const pickedDismiss = useDismiss(() => setPicked(null));
 
   useEffect(() => {
     api.get<Usage>("/api/usage/me").then((r) => setUsage(r.data)).catch(() => {});
@@ -48,6 +50,7 @@ export default function Home() {
           canvasJson: t.canvas_json || undefined,
           templateName: t.name,
           templateId: t.id,
+          folderId: t.folder_id ?? "",
           pages: t.pages,
         },
       });
@@ -179,8 +182,8 @@ export default function Home() {
 
       {/* 최근 만든 것 클릭 → 다운로드/편집 모달 (#5) */}
       {picked && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPicked(null)}>
-          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl dark:bg-neutral-900 rise">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" {...pickedDismiss}>
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl dark:bg-neutral-900 rise">
             <div className="mb-4 flex items-start justify-between gap-3">
               <h2 className="flex items-center gap-2 text-xl font-bold">
                 <Icon icon="ph:image-duotone" className="text-emerald-600 text-[26px]" />

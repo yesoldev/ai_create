@@ -23,6 +23,7 @@ export interface TemplateDetail {
   canvas_json: Record<string, unknown> | null;
   size_w: number | null;
   size_h: number | null;
+  folder_id?: string | null;
   bg_url?: string | null;
   thumb_url?: string;
   pages?: TemplatePage[];

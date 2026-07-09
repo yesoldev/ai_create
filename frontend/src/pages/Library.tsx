@@ -75,6 +75,7 @@ export default function Library() {
           canvasJson: t.canvas_json || undefined,
           templateName: t.name,
           templateId: t.id,
+          folderId: t.folder_id ?? "",
           pages: t.pages,
         },
       });

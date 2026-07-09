@@ -28,7 +28,7 @@ import {
 } from "../lib/studio";
 import { listFolders, createFolder, withDepth, type Folder } from "../lib/folders";
 import { updateTemplate } from "../lib/library";
-import { InputDialog } from "../components/dialogs";
+import { InputDialog, useDismiss } from "../components/dialogs";
 
 type Kind = "banner" | "flyer";
 const QUALITIES = [
@@ -204,7 +204,8 @@ export default function Studio() {
         quality,
         mode: "ai_text",
         text_content: wantedText || undefined,
-        name: title.trim() || undefined,
+        // 프로젝트 제목: 입력한 제목 > 업체명 (문구 전체가 제목으로 들어가지 않게)
+        name: title.trim() || bizName.trim() || undefined,
         kind: kind || undefined,
         ref_generation_id: refId,
         similarity: hasRef ? 2 : undefined,
@@ -423,8 +424,8 @@ export default function Studio() {
             <BigButton icon="ph:arrow-counter-clockwise-bold" tone="soft" onClick={restart}>
               다른 홍보물 또 만들기
             </BigButton>
-            <BigButton icon="ph:house-bold" tone="ghost" onClick={() => nav("/")}>
-              처음으로
+            <BigButton icon="ph:folders-bold" tone="ghost" onClick={() => nav("/library")}>
+              보관함으로 이동
             </BigButton>
           </div>
         </div>
@@ -966,15 +967,15 @@ function PickerModal({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const dismiss = useDismiss(onClose);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" {...dismiss}>
       <div
-        onClick={(e) => e.stopPropagation()}
         className="flex max-h-[80vh] w-full max-w-2xl flex-col rounded-3xl bg-white p-6 shadow-2xl dark:bg-neutral-900 rise"
       >
         <div className="mb-4 flex items-start justify-between gap-3">

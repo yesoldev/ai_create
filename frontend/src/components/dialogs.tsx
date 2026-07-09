@@ -1,18 +1,30 @@
-import { useEffect, useState, type ReactNode, type FormEvent } from "react";
+import { useEffect, useRef, useState, type ReactNode, type FormEvent } from "react";
 import { Icon } from "@iconify/react";
 
+/** 바깥을 '클릭'했을 때만 닫기 — 안에서 드래그(글자 선택 등) 후 바깥에서 놓아도 안 닫힘 */
+export function useDismiss(onClose: () => void) {
+  const downOnOverlay = useRef(false);
+  return {
+    onMouseDown: (e: React.MouseEvent) => {
+      downOnOverlay.current = e.target === e.currentTarget;
+    },
+    onClick: (e: React.MouseEvent) => {
+      if (downOnOverlay.current && e.target === e.currentTarget) onClose();
+      downOnOverlay.current = false;
+    },
+  };
+}
+
 function Overlay({ children, onClose }: { children: ReactNode; onClose: () => void }) {
+  const dismiss = useDismiss(onClose);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl dark:bg-neutral-900 rise"
-      >
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" {...dismiss}>
+      <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl dark:bg-neutral-900 rise">
         {children}
       </div>
     </div>

@@ -53,9 +53,9 @@ test("편집기: 결과에서 열어 글자 추가·되돌리기·저장", async
   await expect(page.getByRole("button", { name: "되돌리기" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "다시" })).toBeEnabled();
 
-  // 이 페이지 PNG 저장 → 다운로드 발생
+  // PNG 저장(현재 페이지) → 다운로드 발생
   const dl = page.waitForEvent("download");
-  await page.getByRole("button", { name: "이 장 PNG", exact: true }).click();
+  await page.getByRole("button", { name: "PNG", exact: true }).click();
   const d = await dl;
   expect(d.suggestedFilename()).toMatch(/홍보물_1\.png/);
 });
@@ -64,6 +64,9 @@ test("편집기: AI로 글자 수정하면 template_id로 새 페이지를 추�
   await login(page);
   await page.route("**/api/refs/upload", (r) =>
     r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ref_upload_id: "ref1" }) }),
+  );
+  await page.route("**/api/templates/*/pages", (r) =>
+    r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) }),
   );
   let sent: Record<string, unknown> = {};
   await page.route("**/api/generate", (route) => {
@@ -83,8 +86,8 @@ test("편집기: AI로 글자 수정하면 template_id로 새 페이지를 추�
   await expect(page).toHaveURL(/\/editor$/);
 
   // AI로 글자 수정 → 기존 프로젝트(template_id) 갱신 요청
-  await page.getByRole("button", { name: /AI로 글자 수정/ }).click();
-  await expect(page.getByRole("heading", { name: "AI로 글자 수정·추가" })).toBeVisible();
+  await page.getByRole("button", { name: /AI로 수정/ }).click();
+  await expect(page.getByRole("heading", { name: "AI로 수정" })).toBeVisible();
   await page.getByPlaceholder(/매물/).fill("여름 세일 시작");
   const aiReq = page.waitForRequest(
     (r) => r.url().endsWith("/api/generate") && r.method() === "POST" && r.postDataJSON()?.template_id === "t",

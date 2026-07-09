@@ -7,7 +7,7 @@ import { saveTemplate, updateTemplate, savePages, deletePage, type TemplatePage 
 import { listFolders, withDepth, type Folder } from "../lib/folders";
 import { generate, uploadRef, krw } from "../lib/studio";
 import { api } from "../lib/api";
-import { ConfirmDialog } from "../components/dialogs";
+import { ConfirmDialog, useDismiss } from "../components/dialogs";
 
 interface EditorState {
   imageUrl?: string;
@@ -17,6 +17,7 @@ interface EditorState {
   templateId?: string; // 연결된 프로젝트(템플릿)
   canvasJson?: Record<string, unknown>;
   templateName?: string;
+  folderId?: string;
   quality?: string;
   kind?: "banner" | "flyer";
   pages?: TemplatePage[];
@@ -35,6 +36,12 @@ function today(): string {
   const d = new Date();
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`;
+}
+
+function nowHHMM(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 function loadImg(url: string): Promise<HTMLImageElement> {
@@ -90,9 +97,12 @@ export default function Editor() {
   const [saveMsg, setSaveMsg] = useState("");
   const [saving, setSaving] = useState(false);
   const [folders, setFolders] = useState<Folder[]>([]);
-  const [folderId, setFolderId] = useState<string>("");
+  const [folderId, setFolderId] = useState<string>(st.folderId || "");
   const [dirty, setDirty] = useState(false);
   const [leaveOpen, setLeaveOpen] = useState(false);
+  const [lastSaved, setLastSaved] = useState<string>(""); // 마지막 저장 시각 표시
+  const [delPageOpen, setDelPageOpen] = useState(false); // 페이지 삭제 확인
+  const saveDismiss = useDismiss(() => setShowSave(false));
   // AI로 글자 수정/추가
   const [aiOpen, setAiOpen] = useState(false);
   const [aiText, setAiText] = useState("");
@@ -322,6 +332,21 @@ export default function Editor() {
     }
   }
 
+  // 페이지 오버레이 자동 저장(조용히) — 페이지 추가/변경 시
+  async function autoSavePages() {
+    if (!st.templateId) return;
+    syncActive();
+    const withId = pagesRef.current.filter((p) => p.id) as { id: string; canvasJson: Record<string, unknown> | null }[];
+    if (!withId.length) return;
+    try {
+      await savePages(st.templateId, withId.map((p) => ({ id: p.id, canvas_json: p.canvasJson ?? {} })));
+      setLastSaved(nowHHMM());
+      setDirty(false);
+    } catch {
+      /* 자동 저장 실패는 조용히 무시(수동 저장으로 보완) */
+    }
+  }
+
   const baseName = () => (tplName.trim() || st.templateName || "홍보물");
 
   // 현재 페이지 저장(원본 해상도 합성)
@@ -452,10 +477,10 @@ export default function Editor() {
       }
       const r = await generate({
         prompt:
-          "참고 이미지의 디자인·구도·색·배치와 나머지 글자는 그대로 두고, 아래 요청만 반영해줘. " +
+          "이 참고 이미지를 바탕으로, 아래 요청만 반영해서 수정해줘. 요청과 관계없는 부분(디자인·구도·색·배치·나머지 글자)은 그대로 유지해. " +
           "요청은 그림에 그대로 적는 글자가 아니라 '무엇을 어떻게 바꾸거나 더할지'에 대한 지시다. " +
           `요청: "${aiText.trim()}". ` +
-          "요청에 없는 글자는 절대 바꾸지 말고, 화살표(→)나 지시문 자체를 그림에 쓰지 마. 없는 정보는 지어내지 마.",
+          "화살표(→)나 지시문 자체를 그림에 쓰지 말고, 없는 정보는 지어내지 마.",
         width: w,
         height: h,
         quality: st.quality || "medium",
@@ -474,6 +499,7 @@ export default function Editor() {
       setAiOpen(false);
       setAiText("");
       await showPage(next.length - 1);
+      await autoSavePages(); // 새 페이지 자동 저장
       setSaveMsg(
         `AI가 새 페이지를 만들었어요. 이번에 ${krw(r.cost_krw)} 썼어요` +
           (r.remaining_krw === null ? " (잔액 무제한)." : ` · 이번 달 남은 금액 ${krw(r.remaining_krw)}.`),
@@ -525,6 +551,7 @@ export default function Editor() {
       }
       setShowSave(false);
       setDirty(false);
+      setLastSaved(nowHHMM());
       setSaveMsg("보관함에 저장했어요.");
     } catch {
       setSaveMsg("저장에 실패했어요. 다시 시도해 주세요.");
@@ -573,18 +600,21 @@ export default function Editor() {
         <div className="flex items-center gap-2 font-semibold">
           <Icon icon="ph:pencil-simple-duotone" className="text-emerald-600 text-[20px]" /> 편집기
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button onClick={() => { setAiMsg(""); setAiOpen(true); }} className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}>
-            <Icon icon="ph:magic-wand-bold" /> AI로 글자 수정
+            <Icon icon="ph:magic-wand-bold" /> AI로 수정
           </button>
-          <button onClick={() => setShowSave(true)} className={`${btn} border-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/30`}>
-            <Icon icon="ph:floppy-disk-bold" /> 보관함에 저장
-          </button>
+          <div className="flex flex-col items-start">
+            <button onClick={() => setShowSave(true)} className={`${btn} border-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/30`}>
+              <Icon icon="ph:floppy-disk-bold" /> 보관함에 저장
+            </button>
+            {lastSaved && <span className="mt-0.5 pl-1 text-xs text-neutral-400">마지막 저장 {lastSaved}</span>}
+          </div>
           <button onClick={() => save("png")} className={`${btn} bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-200`}>
-            <Icon icon="ph:download-simple-bold" /> 이 장 PNG
+            <Icon icon="ph:download-simple-bold" /> PNG
           </button>
           <button onClick={() => save("jpg")} className={`${btn} bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-200`}>
-            <Icon icon="ph:download-simple-bold" /> 이 장 JPG
+            <Icon icon="ph:download-simple-bold" /> JPG
           </button>
           {pages.length > 1 && (
             <button onClick={() => downloadAll("png")} disabled={zipBusy} className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}>
@@ -613,10 +643,29 @@ export default function Editor() {
         ]}
       />
 
+      <ConfirmDialog
+        open={delPageOpen}
+        icon="ph:trash-duotone"
+        title="이 페이지를 삭제할까요?"
+        desc={`${active + 1}페이지가 지워져요. 되돌릴 수 없어요.`}
+        onClose={() => setDelPageOpen(false)}
+        actions={[
+          {
+            label: "삭제",
+            tone: "danger",
+            icon: "ph:trash-bold",
+            onClick: () => {
+              setDelPageOpen(false);
+              deleteCurrentPage();
+            },
+          },
+          { label: "취소", tone: "soft", onClick: () => setDelPageOpen(false) },
+        ]}
+      />
+
       {showSave && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowSave(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" {...saveDismiss}>
           <form
-            onClick={(e) => e.stopPropagation()}
             onSubmit={doSaveTemplate}
             className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl dark:bg-neutral-900"
           >
@@ -695,7 +744,7 @@ export default function Editor() {
           </button>
         ))}
         {pages.length > 1 && (
-          <button onClick={deleteCurrentPage} className={`${tool} h-10 shrink-0`}>
+          <button onClick={() => setDelPageOpen(true)} className={`${tool} h-10 shrink-0`}>
             <Icon icon="ph:trash-bold" /> 이 페이지 삭제
           </button>
         )}
@@ -731,7 +780,7 @@ export default function Editor() {
             <div className="flex items-center justify-between">
               <h2 className="flex items-center gap-2 text-xl font-bold">
                 <Icon icon="ph:magic-wand-duotone" className="text-emerald-600 text-[24px]" />
-                AI로 글자 수정·추가
+                AI로 수정
               </h2>
               <button onClick={() => !aiBusy && setAiOpen(false)} disabled={aiBusy} className="grid h-9 w-9 place-items-center rounded-lg text-neutral-500 hover:bg-neutral-100 disabled:opacity-40 dark:hover:bg-neutral-800">
                 <Icon icon="ph:x-bold" />
@@ -762,14 +811,14 @@ export default function Editor() {
             ) : (
               <>
                 <p className="mt-1 text-base text-neutral-500 dark:text-neutral-400">
-                  어떤 글자를 어떻게 바꾸거나 더할지 적어 주세요. 지금 그림을 참고해 <b>새 페이지</b>로 만들어요.
+                  지금 그림을 참고해 어떻게 바꿀지 적어 주세요. 글자·색·배치 등 무엇이든 요청할 수 있어요. 결과는 <b>새 페이지</b>로 추가돼요.
                 </p>
                 <textarea
                   autoFocus
                   value={aiText}
                   onChange={(e) => setAiText(e.target.value)}
                   rows={6}
-                  placeholder={"예)\n'목적'을 '매물'로 바꿔줘\n맨 아래에 전화번호 010-1234-5678 추가해줘"}
+                  placeholder={"예)\n'목적'을 '매물'로 바꿔줘\n배경을 더 밝은 파란색으로\n맨 아래에 전화번호 010-1234-5678 추가해줘"}
                   className="mt-4 w-full rounded-xl border-2 border-neutral-200 p-3 text-lg outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-800"
                 />
                 {aiMsg && <p className="mt-2 text-base text-red-600 dark:text-red-400">{aiMsg}</p>}
