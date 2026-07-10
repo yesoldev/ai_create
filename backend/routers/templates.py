@@ -1,7 +1,11 @@
 """템플릿 CRUD — Fabric.js 캔버스 JSON + 프롬프트 저장/재사용."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import io
+import uuid
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from PIL import Image
 from pydantic import BaseModel
 
 from db import get_conn
@@ -15,6 +19,61 @@ def _with_thumb(row: dict) -> dict:
     if row.get("thumb_path"):
         row["thumb_url"] = storage.public_url("thumbs", row["thumb_path"])
     return row
+
+
+@router.post("/upload")
+async def upload_project(
+    file: UploadFile = File(...),
+    name: str | None = Form(None),
+    folder_id: str | None = Form(None),
+    user: dict = Depends(get_current_user),
+):
+    """이미지 파일(png/jpg)을 올려 새 프로젝트(1페이지)로 만든다. AI 생성 없음(무과금)."""
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(400, "이미지 파일만 올릴 수 있어요.")
+    data = await file.read()
+    if len(data) > 20 * 1024 * 1024:
+        raise HTTPException(400, "이미지가 너무 큽니다(최대 20MB).")
+    try:
+        img = Image.open(io.BytesIO(data))
+        w, h = img.size
+        buf = io.BytesIO()
+        img.convert("RGBA").save(buf, format="PNG")
+        png = buf.getvalue()
+    except Exception:  # noqa: BLE001
+        raise HTTPException(400, "이미지를 읽을 수 없어요.")
+
+    gid = str(uuid.uuid4())
+    result_path = f"{user['id']}/{gid}.png"
+    thumb_path = f"{user['id']}/{gid}.jpg"
+    await storage.upload("results", result_path, png, "image/png")
+    await storage.upload("thumbs", thumb_path, storage.make_thumbnail(png), "image/jpeg")
+
+    base = (name or file.filename or "").rsplit(".", 1)[0].strip()
+    project_name = base[:30] or "올린 홍보물"
+    with get_conn() as conn:
+        prow = conn.execute(
+            "insert into public.templates "
+            "(folder_id, name, canvas_json, prompt, size_w, size_h, dpi, bg_image_path, thumb_path, created_by) "
+            "values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id",
+            (folder_id, project_name, None, None, w, h, 300, result_path, thumb_path, user["id"]),
+        ).fetchone()
+        pid = prow["id"]
+        page = conn.execute(
+            "insert into public.template_pages (template_id, sort_order, bg_image_path, thumb_path, canvas_json) "
+            "values (%s,0,%s,%s,%s) returning id",
+            (pid, result_path, thumb_path, None),
+        ).fetchone()
+
+    return {
+        "project_id": pid,
+        "page_id": page["id"],
+        "name": project_name,
+        "size_w": w,
+        "size_h": h,
+        "image_url": await storage.signed_url("results", result_path),
+        "thumb_url": storage.public_url("thumbs", thumb_path),
+    }
 
 
 @router.get("")

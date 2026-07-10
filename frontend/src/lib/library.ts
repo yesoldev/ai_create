@@ -60,6 +60,24 @@ export async function deleteTemplate(id: string): Promise<void> {
   await api.delete(`/api/templates/${id}`);
 }
 
+export interface UploadResult {
+  project_id: string;
+  page_id: string;
+  name: string;
+  size_w: number;
+  size_h: number;
+  image_url: string;
+  thumb_url: string;
+}
+
+// 이미지 파일을 올려 새 프로젝트로 만들기 (AI 생성 없음)
+export async function uploadProject(file: File, folderId?: string | null): Promise<UploadResult> {
+  const fd = new FormData();
+  fd.append("file", file);
+  if (folderId) fd.append("folder_id", folderId);
+  return (await api.post<UploadResult>("/api/templates/upload", fd)).data;
+}
+
 // 페이지별 오버레이(canvas_json) 일괄 저장
 export async function savePages(
   templateId: string,

@@ -83,3 +83,37 @@ test("보관함: 편집기에서 저장하고 다시 열기", async ({ page }) =
   await expect(page).toHaveURL(/\/editor$/);
   await expect(page.getByRole("button", { name: "글자 넣기" })).toBeVisible();
 });
+
+test("보관함: 새 프로젝트 모달에서 이미지 올리기로 프로젝트를 만든다", async ({ page }) => {
+  await page.route("**/api/templates", (r) =>
+    r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [] }) }),
+  );
+  await page.route("**/api/folders/tree", (r) =>
+    r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [] }) }),
+  );
+  let uploaded = false;
+  await page.route("**/api/templates/upload", (r) => {
+    uploaded = true;
+    r.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ project_id: "up1", page_id: "pg1", name: "올린 홍보물", size_w: 500, size_h: 200, image_url: FAKE_PNG, thumb_url: FAKE_PNG }),
+    });
+  });
+
+  await login(page);
+  await page.goto("/library");
+  await page.getByRole("button", { name: /새 프로젝트/ }).click();
+  await expect(page.getByRole("heading", { name: "새 프로젝트 만들기" })).toBeVisible();
+  // 두 선택지(AI로 만들기 / 이미지 올리기)
+  await expect(page.getByRole("button", { name: /AI로 만들기/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /이미지 올리기/ })).toBeVisible();
+  // 파일 선택 → 업로드 → 편집기로 이동
+  await page.setInputFiles('input[type="file"]', {
+    name: "photo.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(FAKE_PNG.split(",")[1], "base64"),
+  });
+  await expect(page).toHaveURL(/\/editor$/, { timeout: 10_000 });
+  expect(uploaded).toBe(true);
+});

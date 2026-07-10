@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@iconify/react";
-import { listTemplates, getTemplate, deleteTemplate, type TemplateListItem } from "../lib/library";
+import { listTemplates, getTemplate, deleteTemplate, uploadProject, type TemplateListItem } from "../lib/library";
 import { listFolders, createFolder, deleteFolder, withDepth, type Folder } from "../lib/folders";
-import { InputDialog, ConfirmDialog } from "../components/dialogs";
+import { InputDialog, ConfirmDialog, useDismiss } from "../components/dialogs";
 
 export default function Library() {
   const nav = useNavigate();
@@ -14,6 +14,34 @@ export default function Library() {
   const [opening, setOpening] = useState<string | null>(null);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [confirm, setConfirm] = useState<{ title: string; desc?: string; onYes: () => void } | null>(null);
+  const [newOpen, setNewOpen] = useState(false); // 새 프로젝트 선택 모달
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const newDismiss = useDismiss(() => !uploading && setNewOpen(false));
+
+  async function doUpload(file: File | undefined) {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const r = await uploadProject(file, sel);
+      nav("/editor", {
+        state: {
+          imageUrl: r.image_url,
+          w: r.size_w,
+          h: r.size_h,
+          templateId: r.project_id,
+          templateName: r.name,
+          folderId: sel ?? "",
+          pages: [{ id: r.page_id, sort_order: 0, bg_url: r.image_url, canvas_json: null }],
+        },
+      });
+    } catch {
+      alert("이미지를 올리지 못했어요. png/jpg 파일인지 확인해 주세요.");
+    } finally {
+      setUploading(false);
+      setNewOpen(false);
+    }
+  }
 
   async function loadFolders() {
     try {
@@ -107,7 +135,7 @@ export default function Library() {
           보관함
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => nav("/studio")} className="flex h-11 items-center gap-1 rounded-xl bg-emerald-600 px-4 text-base font-bold text-white hover:bg-emerald-500">
+          <button onClick={() => setNewOpen(true)} className="flex h-11 items-center gap-1 rounded-xl bg-emerald-600 px-4 text-base font-bold text-white hover:bg-emerald-500">
             <Icon icon="ph:plus-bold" /> 새 프로젝트
           </button>
           <button onClick={() => nav("/")} className="flex h-11 items-center gap-1 rounded-xl px-3 text-base text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800">
@@ -207,6 +235,56 @@ export default function Library() {
           { label: "취소", tone: "ghost", onClick: () => setConfirm(null) },
         ]}
       />
+
+      {/* 새 프로젝트 — AI 생성 / 이미지 올리기 선택 */}
+      {newOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" {...newDismiss}>
+          <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl dark:bg-neutral-900 rise">
+            <div className="mb-4 flex items-start justify-between">
+              <h2 className="text-xl font-bold">새 프로젝트 만들기</h2>
+              <button onClick={() => !uploading && setNewOpen(false)} disabled={uploading} className="grid h-9 w-9 place-items-center rounded-lg text-neutral-500 hover:bg-neutral-100 disabled:opacity-40 dark:hover:bg-neutral-800">
+                <Icon icon="ph:x-bold" />
+              </button>
+            </div>
+            {uploading ? (
+              <div className="grid place-items-center py-14 text-center">
+                <Icon icon="ph:spinner-gap-bold" className="animate-spin text-5xl text-emerald-500" />
+                <p className="mt-4 text-lg font-semibold">이미지를 올리는 중이에요...</p>
+              </div>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <button
+                  onClick={() => { setNewOpen(false); nav("/studio"); }}
+                  className="flex flex-col items-center gap-3 rounded-2xl border-2 border-neutral-200 p-6 text-center transition hover:border-emerald-400 hover:bg-emerald-50 dark:border-neutral-700 dark:hover:bg-emerald-950/30"
+                >
+                  <span className="grid h-16 w-16 place-items-center rounded-2xl bg-emerald-600 text-white">
+                    <Icon icon="ph:magic-wand-duotone" className="text-[34px]" />
+                  </span>
+                  <span className="text-lg font-bold">AI로 만들기</span>
+                  <span className="text-base text-neutral-500 dark:text-neutral-400">설명을 적으면 AI가 새로 그려줘요</span>
+                </button>
+                <button
+                  onClick={() => fileRef.current?.click()}
+                  className="flex flex-col items-center gap-3 rounded-2xl border-2 border-neutral-200 p-6 text-center transition hover:border-emerald-400 hover:bg-emerald-50 dark:border-neutral-700 dark:hover:bg-emerald-950/30"
+                >
+                  <span className="grid h-16 w-16 place-items-center rounded-2xl bg-neutral-700 text-white">
+                    <Icon icon="ph:upload-simple-duotone" className="text-[34px]" />
+                  </span>
+                  <span className="text-lg font-bold">이미지 올리기</span>
+                  <span className="text-base text-neutral-500 dark:text-neutral-400">가진 그림(png·jpg)으로 시작해요</span>
+                </button>
+              </div>
+            )}
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/png,image/jpeg"
+              className="hidden"
+              onChange={(e) => doUpload(e.target.files?.[0])}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
