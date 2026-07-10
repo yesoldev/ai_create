@@ -582,12 +582,12 @@ export default function Editor() {
 
   function tryLeave() {
     if (dirty) setLeaveOpen(true);
-    else nav(-1);
+    else nav("/library");
   }
   function doLeave() {
     setLeaveOpen(false);
     setDirty(false);
-    nav(-1);
+    nav("/library");
   }
 
   // 폴더 이동
