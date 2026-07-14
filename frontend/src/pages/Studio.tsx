@@ -13,6 +13,7 @@ import {
   toPx,
   fetchEstimate,
   generate,
+  uploadRef,
   copywrite,
   krw,
   downloadImage,
@@ -69,6 +70,7 @@ export default function Studio() {
   const [title, setTitle] = useState(""); // 저장될 제목(파일명·프로젝트명)
   const [color, setColor] = useState<ColorChoice | null>(null); // 배경 색상 선택
   const [refGen, setRefGen] = useState<RecentGen | null>(null); // 참고할 최근 생성 이미지
+  const [refFile, setRefFile] = useState<File | null>(null); // 참고할 업로드 이미지
   const [copyIdeas, setCopyIdeas] = useState<string[]>([]);
   const [copyBusy, setCopyBusy] = useState(false);
 
@@ -198,9 +200,13 @@ export default function Studio() {
     setBusy(true);
     setError("");
     try {
-      // 참고 이미지: "비슷하게 다시 만들기"(인자) 우선, 아니면 문구 단계에서 고른 최근 이미지
-      const refId = refGenerationId || refGen?.id;
-      const hasRef = !!refId;
+      // 참고 이미지: "비슷하게 다시 만들기"(인자) 우선, 아니면 업로드/최근이미지
+      let refUploadId: string | undefined;
+      if (!refGenerationId && refFile) {
+        refUploadId = await uploadRef(refFile);
+      }
+      const refId = refGenerationId || (refUploadId ? undefined : refGen?.id);
+      const hasRef = !!refId || !!refUploadId;
       const isFlyer = kind === "flyer";
       // 그림에 넣을 글자: 전단지는 업체명+전단지 문구(여러 줄), 배너는 업체명+짧은 문구
       const wantedText = isFlyer
@@ -222,6 +228,7 @@ export default function Studio() {
         name: title.trim() || bizName.trim() || undefined,
         kind: kind || undefined,
         ref_generation_id: refId,
+        ref_upload_id: refUploadId,
         similarity: hasRef ? 2 : undefined,
       });
       setResult(r);
@@ -254,6 +261,7 @@ export default function Studio() {
     setTitle("");
     setColor(null);
     setRefGen(null);
+    setRefFile(null);
     setCopyIdeas([]);
   }
 
@@ -815,9 +823,17 @@ export default function Studio() {
             )}
 
             <p className="mb-2 mt-6 text-lg font-semibold">
-              참고할 이미지 <span className="font-normal text-neutral-400">(선택 · 최근 만든 것과 비슷하게 만들어요)</span>
+              참고할 이미지 <span className="font-normal text-neutral-400">(선택 · 이 이미지와 비슷하게 만들어요)</span>
             </p>
-            {refGen ? (
+            {refFile ? (
+              <div className="flex items-center gap-3 rounded-2xl border-2 border-emerald-200 bg-emerald-50/50 p-3 dark:border-emerald-900/50 dark:bg-emerald-950/20">
+                <img src={URL.createObjectURL(refFile)} alt="참고 이미지" className="h-16 w-16 rounded-lg object-cover" />
+                <span className="flex-1 truncate text-base">{refFile.name}</span>
+                <button type="button" onClick={() => setRefFile(null)} className="flex h-10 items-center gap-1 rounded-lg px-3 text-base text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800">
+                  <Icon icon="ph:x-bold" /> 빼기
+                </button>
+              </div>
+            ) : refGen ? (
               <div className="flex items-center gap-3 rounded-2xl border-2 border-emerald-200 bg-emerald-50/50 p-3 dark:border-emerald-900/50 dark:bg-emerald-950/20">
                 <img src={refGen.thumb_url} alt="참고 이미지" className="h-16 w-16 rounded-lg object-cover" />
                 <span className="flex-1 truncate text-base">{refGen.prompt?.slice(0, 24) || "최근 만든 이미지"}</span>
@@ -825,19 +841,28 @@ export default function Studio() {
                   <Icon icon="ph:x-bold" /> 빼기
                 </button>
               </div>
-            ) : recentGens.length > 0 ? (
-              <button
-                type="button"
-                onClick={() => setShowRefPicker(true)}
-                className="flex h-14 w-full items-center gap-2 rounded-2xl border-2 border-dashed border-neutral-300 px-4 text-lg text-neutral-500 hover:border-emerald-400 hover:text-emerald-700 dark:border-neutral-700"
-              >
-                <Icon icon="ph:images-duotone" className="text-[24px]" />
-                최근 만든 이미지에서 고르기
-              </button>
             ) : (
-              <p className="rounded-2xl border-2 border-dashed border-neutral-200 px-4 py-4 text-base text-neutral-400 dark:border-neutral-800">
-                아직 만든 이미지가 없어요. 하나 만들면 여기서 골라 비슷하게 만들 수 있어요.
-              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="flex h-14 cursor-pointer items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-neutral-300 px-4 text-lg text-neutral-500 hover:border-emerald-400 hover:text-emerald-700 dark:border-neutral-700">
+                  <Icon icon="ph:upload-simple-duotone" className="text-[24px]" />
+                  이미지 올리기
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg"
+                    className="hidden"
+                    onChange={(e) => { setRefFile(e.target.files?.[0] ?? null); setRefGen(null); }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowRefPicker(true)}
+                  disabled={recentGens.length === 0}
+                  className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-neutral-300 px-4 text-lg text-neutral-500 hover:border-emerald-400 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-neutral-700"
+                >
+                  <Icon icon="ph:images-duotone" className="text-[24px]" />
+                  최근 만든 것에서 고르기
+                </button>
+              </div>
             )}
           </Section>
         )}
@@ -868,7 +893,11 @@ export default function Studio() {
               {kind === "flyer"
                 ? flyerText.trim() && <SummaryRow label="전단지 문구" value={flyerText} />
                 : textContent.trim() && <SummaryRow label="넣을 글자" value={textContent} />}
-              {refGen && <SummaryRow label="참고 이미지" value="최근 만든 것과 비슷하게" />}
+              {refFile ? (
+                <SummaryRow label="참고 이미지" value="올린 이미지와 비슷하게" />
+              ) : refGen ? (
+                <SummaryRow label="참고 이미지" value="최근 만든 것과 비슷하게" />
+              ) : null}
             </dl>
             <EstimateBar estimate={estimate} />
             {error && (
@@ -950,6 +979,7 @@ export default function Studio() {
                 type="button"
                 onClick={() => {
                   setRefGen(g);
+                  setRefFile(null);
                   setShowRefPicker(false);
                 }}
                 className="overflow-hidden rounded-2xl border-2 border-neutral-200 text-left transition hover:border-emerald-400 dark:border-neutral-800"

@@ -140,8 +140,8 @@ test("참고할 이미지를 최근 생성물에서 고르면 ref_generation_id�
   await page.getByRole("button", { name: /보통 \(추천\)/ }).click();
   await page.getByRole("button", { name: "다음", exact: true }).click();
   await page.getByLabel("만들고 싶은 그림 설명").fill("따뜻한 가게 홍보");
-  // 최근 만든 이미지에서 참고 이미지 고르기
-  await page.getByRole("button", { name: /최근 만든 이미지에서 고르기/ }).click();
+  // 최근 만든 것에서 참고 이미지 고르기
+  await page.getByRole("button", { name: /최근 만든 것에서 고르기/ }).click();
   await page.getByRole("button", { name: /지난 배너/ }).click();
   await page.getByRole("button", { name: /빼기/ }).waitFor(); // 선택됨 표시
   await page.getByRole("button", { name: "다음", exact: true }).click();
@@ -149,6 +149,37 @@ test("참고할 이미지를 최근 생성물에서 고르면 ref_generation_id�
 
   await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
   expect(sent.ref_generation_id).toBe("prev1");
+});
+
+test("참고할 이미지를 올리면 ref_upload_id로 생성된다", async ({ page }) => {
+  await login(page);
+  await page.route("**/api/refs/upload", (r) =>
+    r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ref_upload_id: "up1" }) }),
+  );
+  let sent: Record<string, unknown> = {};
+  await page.route("**/api/generate", (route) => {
+    sent = route.request().postDataJSON();
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ generation_id: "g", project_id: "p", project_name: "홍보물", page_id: "pg", image_url: FAKE_PNG, thumb_url: FAKE_PNG, size: "500x200", cost_krw: 15, remaining_krw: null }) });
+  });
+
+  await page.getByRole("button", { name: /새 홍보물 만들기/ }).click();
+  await page.getByRole("button", { name: /배너/ }).first().click();
+  await page.getByRole("button", { name: "음식점" }).click();
+  await page.getByRole("button", { name: /보통 \(추천\)/ }).click();
+  await page.getByRole("button", { name: "다음", exact: true }).click();
+  await page.getByLabel("만들고 싶은 그림 설명").fill("따뜻한 가게 홍보");
+  // 참고 이미지 올리기
+  await page.setInputFiles('input[type="file"]', {
+    name: "ref.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(FAKE_PNG.split(",")[1], "base64"),
+  });
+  await page.getByRole("button", { name: /빼기/ }).waitFor(); // 선택됨 표시
+  await page.getByRole("button", { name: "다음", exact: true }).click();
+  await page.getByRole("button", { name: "만들기", exact: true }).click();
+
+  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
+  expect(sent.ref_upload_id).toBe("up1");
 });
 
 test("직접 크기(mm) 입력이 px로 환산되어 생성된다", async ({ page }) => {
