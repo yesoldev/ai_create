@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import logging
 import uuid
 
 import httpx
@@ -18,6 +19,7 @@ from deps import get_current_user
 from services import cost, ledger, openai_client, sizing, storage
 
 router = APIRouter(prefix="/api", tags=["generate"])
+logger = logging.getLogger("generate")
 
 _MM_PER_INCH = 25.4
 
@@ -118,6 +120,11 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
         else:
             png, usage, (w, h) = await openai_client.generate_image(prompt, w, h, body.quality)
     except Exception as e:  # noqa: BLE001
+        # 실제 원인(OpenAI 에러/타임아웃 등)을 서버 로그에 남긴다(진단용).
+        logger.exception(
+            "이미지 생성 실패 user=%s ref=%s size=%sx%s quality=%s",
+            user.get("id"), bool(ref_bytes), w, h, body.quality,
+        )
         raise HTTPException(502, f"이미지 생성 실패: {e}")
 
     # 4) 실제 비용
@@ -230,6 +237,7 @@ async def inpaint(body: InpaintBody, user: dict = Depends(get_current_user)):
     try:
         png, usage = await openai_client.inpaint_image(src, mask, body.prompt, body.quality)
     except Exception as e:  # noqa: BLE001
+        logger.exception("부분 재생성 실패 user=%s", user.get("id"))
         raise HTTPException(502, f"부분 재생성 실패: {e}")
 
     cost_krw = cost.actual_cost_krw(usage)
