@@ -217,6 +217,40 @@ test("직접 크기(mm) 입력이 px로 환산되어 생성된다", async ({ pag
   expect(sentBody.height).toBe(2362);
 });
 
+test("단계를 넘기면 화면 맨 위부터 보인다", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 700 }); // 스크롤이 생기도록 낮게
+  await login(page);
+  await page.route("**/api/generate", (r) =>
+    r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ generation_id: "s", project_id: "p", project_name: "홍보물", page_id: "pg", image_url: FAKE_PNG, thumb_url: FAKE_PNG, size: "500x200", cost_krw: 9, remaining_krw: null }) }),
+  );
+
+  await page.getByRole("button", { name: /새 홍보물 만들기/ }).click();
+  await page.getByRole("button", { name: /배너/ }).first().click();
+  await page.getByRole("button", { name: "음식점" }).click();
+
+  // 3단계 아래쪽(품질)까지 스크롤한 뒤 다음 → 4단계는 맨 위부터 보여야 한다
+  await page.getByRole("button", { name: /보통 \(추천\)/ }).click();
+  await page.mouse.wheel(0, 2000);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "다음", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "어떤 그림을 원하세요?" })).toBeVisible();
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+
+  // 4단계 → 5단계(이대로 만들까요?)도 마찬가지
+  await page.getByLabel("만들고 싶은 그림 설명").fill("가게 홍보");
+  await page.mouse.wheel(0, 2000);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "다음", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "이대로 만들까요?" })).toBeVisible();
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+
+  // 만들기 → 결과 화면도 맨 위부터
+  await page.mouse.wheel(0, 2000);
+  await page.getByRole("button", { name: "만들기", exact: true }).click();
+  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+});
+
 test("자유도: 고른 값에 따라 설명이 바뀌고 프롬프트 변주가 달라진다", async ({ page }) => {
   await login(page);
   let sent: Record<string, unknown> = {};

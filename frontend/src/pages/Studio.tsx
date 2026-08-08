@@ -141,6 +141,12 @@ export default function Studio() {
   const [error, setError] = useState("");
   const [result, setResult] = useState<GenerateResult | null>(null);
 
+  // 단계가 바뀌거나 결과가 나오면 화면 맨 위부터 보이게.
+  // (앞 단계에서 아래로 스크롤한 상태 그대로 넘어가면 새 화면의 중간·하단이 보인다)
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [step, result]);
+
   // 생성 중일 때 상태 메시지 순환
   useEffect(() => {
     if (!busy) return;
