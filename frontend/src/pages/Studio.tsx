@@ -10,6 +10,7 @@ import {
   NEWSPAPER_HINT,
   FLYER_HINT,
   FREEDOMS,
+  josa,
   variationHint,
   getFreedom,
   setFreedom,
@@ -893,7 +894,8 @@ export default function Studio() {
                 <p className="mb-1 text-lg font-semibold">
                   그림 자유도 <span className="font-normal text-neutral-400">(같은 내용이라도 얼마나 다르게 그릴지)</span>
                 </p>
-                <div className="mb-5 grid gap-3 sm:grid-cols-3">
+                {/* 설명이 길어 3열에서는 줄바꿈이 지저분해진다 → 항상 전체폭 세로 배치 */}
+                <div className="mb-5 grid gap-3">
                   {FREEDOMS.map((f) => (
                     <ChoiceCard
                       key={f.key}
@@ -913,9 +915,12 @@ export default function Studio() {
                   const f = FREEDOMS.find((x) => x.key === freedom);
                   if (!f) return null;
                   return (
-                    <div className="mb-5 space-y-3 rounded-2xl border-2 border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-900/50 dark:bg-emerald-950/20">
-                      <p className="text-lg font-semibold">
-                        &lsquo;{f.label}&rsquo;을(를) 고르면
+                    <div
+                      aria-live="polite"
+                      className="mb-5 space-y-3 rounded-2xl border-2 border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-800/70 dark:bg-emerald-950/30"
+                    >
+                      <p className="text-xl font-bold">
+                        &lsquo;{f.label}&rsquo;{josa(f.label, "을/를")} 고르면
                       </p>
                       <FreedomLine icon="ph:shuffle-duotone" label="만들 때마다 바뀌는 것" text={f.changes} />
                       <FreedomLine icon="ph:lock-simple-duotone" label="바뀌지 않는 것" text={f.keeps} />
@@ -1206,8 +1211,8 @@ function EstimateBar({ estimate }: { estimate: Estimate | null }) {
 function FreedomLine({ icon, label, text }: { icon: string; label: string; text: string }) {
   return (
     <div className="flex items-start gap-3">
-      <Icon icon={icon} className="mt-0.5 shrink-0 text-[24px] text-emerald-600 dark:text-emerald-400" />
-      <p className="text-base leading-relaxed">
+      <Icon icon={icon} className="mt-1 shrink-0 text-[26px] text-emerald-600 dark:text-emerald-400" />
+      <p className="text-lg leading-relaxed">
         <b className="mr-1">{label}</b>
         <span className="text-neutral-700 dark:text-neutral-300">{text}</span>
       </p>

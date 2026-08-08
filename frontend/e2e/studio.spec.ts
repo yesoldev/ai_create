@@ -239,13 +239,13 @@ test("자유도: 고른 값에 따라 설명이 바뀌고 프롬프트 변주가
   await goToSummary("밤 분위기 가게 홍보");
 
   // 기본값 '적당히 다르게' + 설명 패널 노출
-  await expect(page.getByText("‘적당히 다르게’을(를) 고르면")).toBeVisible();
+  await expect(page.getByText("‘적당히 다르게’를 고르면")).toBeVisible();
   await expect(page.getByText("만들 때마다 바뀌는 것")).toBeVisible();
   await expect(page.getByText(/그림을 어디에 놓을지 6가지/)).toBeVisible();
 
   // '안정적으로'로 바꾸면 설명이 즉시 바뀐다
   await page.getByRole("button", { name: /안정적으로/ }).click();
-  await expect(page.getByText("‘안정적으로’을(를) 고르면")).toBeVisible();
+  await expect(page.getByText("‘안정적으로’를 고르면")).toBeVisible();
   await expect(page.getByText("바뀌는 것이 없어요", { exact: false })).toBeVisible();
 
   // 안정적으로 = 변주 문구 없음 (작업 전과 동일한 프롬프트)
@@ -256,7 +256,7 @@ test("자유도: 고른 값에 따라 설명이 바뀌고 프롬프트 변주가
   // 세션에 저장되어 새 홍보물에서도 '안정적으로'가 유지된다
   await page.goto("/");
   await goToSummary("두 번째 밤 배너");
-  await expect(page.getByText("‘안정적으로’을(를) 고르면")).toBeVisible();
+  await expect(page.getByText("‘안정적으로’를 고르면")).toBeVisible();
 
   // '매번 새롭게'는 그림체까지 변주에 포함
   await page.getByRole("button", { name: /매번 새롭게/ }).click();

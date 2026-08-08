@@ -145,6 +145,14 @@ function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+/** 앞 글자의 받침에 따라 조사를 고른다. ("을/를" → 받침 있으면 "을") */
+export function josa(word: string, pair: string): string {
+  const [withBatchim, withoutBatchim] = pair.split("/");
+  const code = word.charCodeAt(word.length - 1);
+  const hangul = code >= 0xac00 && code <= 0xd7a3;
+  return hangul && (code - 0xac00) % 28 !== 0 ? withBatchim : withoutBatchim;
+}
+
 // 자유도 — 변주를 얼마나 세게 걸지. 사용자가 고르고 세션 동안 유지된다.
 export type Freedom = "safe" | "normal" | "wild";
 export interface FreedomChoice {
@@ -180,7 +188,7 @@ export const FREEDOMS: FreedomChoice[] = [
     icon: "ph:sparkle-duotone",
     label: "매번 새롭게",
     desc: "그림체까지 과감하게 바뀜",
-    changes: "위의 배치·빛에 더해, 그림 그리는 방식 6가지까지 매번 바꿉니다. (예: 이번엔 사진처럼, 다음엔 색연필 그림처럼, 그 다음엔 색종이 오려 붙인 것처럼)",
+    changes: "‘적당히 다르게’에서 바뀌는 배치·빛에 더해, 그림 그리는 방식 6가지까지 매번 바꿉니다. (예: 이번엔 사진처럼, 다음엔 색연필 그림처럼, 그 다음엔 색종이 오려 붙인 것처럼)",
     keeps: "적어 주신 글자와 업종만 그대로 지켜요.",
     when: "새로운 아이디어를 폭넓게 보고 싶을 때 좋아요. 대신 만들 때마다 분위기가 많이 달라집니다.",
   },
