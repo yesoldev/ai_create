@@ -217,6 +217,88 @@ test("직접 크기(mm) 입력이 px로 환산되어 생성된다", async ({ pag
   expect(sentBody.height).toBe(2362);
 });
 
+test("자유도: 고른 값에 따라 설명이 바뀌고 프롬프트 변주가 달라진다", async ({ page }) => {
+  await login(page);
+  let sent: Record<string, unknown> = {};
+  await page.route("**/api/generate", (route) => {
+    sent = route.request().postDataJSON();
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ generation_id: "f1", project_id: "p", project_name: "밤 배너", page_id: "pg", image_url: FAKE_PNG, thumb_url: FAKE_PNG, size: "500x200", cost_krw: 9, remaining_krw: null }) });
+  });
+
+  async function goToSummary(desc: string) {
+    await page.getByRole("button", { name: /새 홍보물 만들기/ }).click();
+    await page.getByRole("button", { name: /배너/ }).first().click();
+    await page.getByRole("button", { name: "유흥업소" }).click();
+    await page.getByRole("button", { name: /보통 \(추천\)/ }).click();
+    await page.getByRole("button", { name: "다음", exact: true }).click();
+    await page.getByLabel("만들고 싶은 그림 설명").fill(desc);
+    await page.getByRole("button", { name: "다음", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "이대로 만들까요?" })).toBeVisible();
+  }
+
+  await goToSummary("밤 분위기 가게 홍보");
+
+  // 기본값 '적당히 다르게' + 설명 패널 노출
+  await expect(page.getByText("‘적당히 다르게’을(를) 고르면")).toBeVisible();
+  await expect(page.getByText("만들 때마다 바뀌는 것")).toBeVisible();
+  await expect(page.getByText(/그림을 어디에 놓을지 6가지/)).toBeVisible();
+
+  // '안정적으로'로 바꾸면 설명이 즉시 바뀐다
+  await page.getByRole("button", { name: /안정적으로/ }).click();
+  await expect(page.getByText("‘안정적으로’을(를) 고르면")).toBeVisible();
+  await expect(page.getByText("바뀌는 것이 없어요", { exact: false })).toBeVisible();
+
+  // 안정적으로 = 변주 문구 없음 (작업 전과 동일한 프롬프트)
+  await page.getByRole("button", { name: "만들기", exact: true }).click();
+  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
+  expect(String(sent.prompt)).not.toContain("이번 그림은");
+
+  // 세션에 저장되어 새 홍보물에서도 '안정적으로'가 유지된다
+  await page.goto("/");
+  await goToSummary("두 번째 밤 배너");
+  await expect(page.getByText("‘안정적으로’을(를) 고르면")).toBeVisible();
+
+  // '매번 새롭게'는 그림체까지 변주에 포함
+  await page.getByRole("button", { name: /매번 새롭게/ }).click();
+  await expect(page.getByText(/그림 그리는 방식 6가지까지/)).toBeVisible();
+  await page.getByRole("button", { name: "만들기", exact: true }).click();
+  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
+  expect(String(sent.prompt)).toContain("이번 그림은");
+  expect(String(sent.prompt)).toContain("그림체는");
+});
+
+test("자유도: 참고 이미지가 있으면 선택칸이 숨고 변주도 안 붙는다", async ({ page }) => {
+  await login(page);
+  await page.route("**/api/refs/upload", (r) =>
+    r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ref_upload_id: "up1" }) }),
+  );
+  let sent: Record<string, unknown> = {};
+  await page.route("**/api/generate", (route) => {
+    sent = route.request().postDataJSON();
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ generation_id: "g", project_id: "p", project_name: "홍보물", page_id: "pg", image_url: FAKE_PNG, thumb_url: FAKE_PNG, size: "500x200", cost_krw: 15, remaining_krw: null }) });
+  });
+
+  await page.getByRole("button", { name: /새 홍보물 만들기/ }).click();
+  await page.getByRole("button", { name: /배너/ }).first().click();
+  await page.getByRole("button", { name: "유흥업소" }).click();
+  await page.getByRole("button", { name: /보통 \(추천\)/ }).click();
+  await page.getByRole("button", { name: "다음", exact: true }).click();
+  await page.getByLabel("만들고 싶은 그림 설명").fill("밤 분위기 가게 홍보");
+  await page.setInputFiles('input[type="file"]', {
+    name: "ref.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(FAKE_PNG.split(",")[1], "base64"),
+  });
+  await page.getByRole("button", { name: /빼기/ }).waitFor();
+  await page.getByRole("button", { name: "다음", exact: true }).click();
+
+  // 참고 이미지가 있으면 자유도 선택칸이 아예 없다
+  await expect(page.getByText("그림 자유도")).toHaveCount(0);
+  await page.getByRole("button", { name: "만들기", exact: true }).click();
+  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
+  expect(String(sent.prompt)).not.toContain("이번 그림은");
+});
+
 test("바탕 색을 고르면 프롬프트에 색이 주입된다", async ({ page }) => {
   await login(page);
   let sent: Record<string, unknown> = {};

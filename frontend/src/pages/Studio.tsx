@@ -9,6 +9,10 @@ import {
   COLORS,
   NEWSPAPER_HINT,
   FLYER_HINT,
+  FREEDOMS,
+  variationHint,
+  getFreedom,
+  setFreedom,
   fetchDefaultSizes,
   toPx,
   fetchEstimate,
@@ -27,6 +31,7 @@ import {
   type BizType,
   type RecentGen,
   type ColorChoice,
+  type Freedom,
 } from "../lib/studio";
 import { listFolders, createFolder, withDepth, type Folder } from "../lib/folders";
 import { updateTemplate } from "../lib/library";
@@ -63,6 +68,7 @@ export default function Studio() {
   const [ch, setCh] = useState(400);
   const [unit, setUnit] = useState<Unit>("px");
   const [quality, setQuality] = useState("medium");
+  const [freedom, setFreedomState] = useState<Freedom>(getFreedom); // 세션에 저장된 값으로 시작
   const [description, setDescription] = useState("");
   const [bizName, setBizName] = useState(""); // 업체명 — 그림에 크게 넣을 주 문구
   const [textContent, setTextContent] = useState(""); // 배너: 더 넣을 짧은 문구
@@ -215,7 +221,9 @@ export default function Studio() {
       const colorHint = color ? ` 전체적인 색감과 분위기를 ${color.name} 계열로 조화롭게 통일해, 밝고 선명하게.` : "";
       const extra = extraPrompt?.trim() ? ` ${extraPrompt.trim()}.` : "";
       const hint = isFlyer ? FLYER_HINT : NEWSPAPER_HINT;
-      const fullPrompt = `${bizLabel ? `[업종: ${bizLabel}] ` : ""}${description}.${extra}${colorHint} ${hint}`;
+      // 참고 이미지가 있으면 "비슷하게"가 목적이므로 변주를 넣지 않는다.
+      const varied = hasRef ? "" : variationHint(freedom);
+      const fullPrompt = `${bizLabel ? `[업종: ${bizLabel}] ` : ""}${description}.${extra}${colorHint} ${hint}${varied}`;
       pushRecentPrompt(description); // 다음에 재사용할 수 있게 저장
       const r = await generate({
         prompt: fullPrompt,
@@ -879,6 +887,44 @@ export default function Studio() {
               placeholder={bizName.trim() || "예) 봄맞이 할인 배너"}
               className="mb-5 h-14 w-full rounded-2xl border-2 border-neutral-200 bg-neutral-50 px-4 text-lg outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15 dark:border-neutral-800 dark:bg-neutral-900"
             />
+            {/* 자유도 — 참고 이미지가 있으면 '비슷하게'가 목적이라 적용되지 않음 */}
+            {!refFile && !refGen && (
+              <>
+                <p className="mb-1 text-lg font-semibold">
+                  그림 자유도 <span className="font-normal text-neutral-400">(같은 내용이라도 얼마나 다르게 그릴지)</span>
+                </p>
+                <div className="mb-5 grid gap-3 sm:grid-cols-3">
+                  {FREEDOMS.map((f) => (
+                    <ChoiceCard
+                      key={f.key}
+                      active={freedom === f.key}
+                      icon={f.icon}
+                      title={f.label}
+                      desc={f.desc}
+                      onClick={() => {
+                        setFreedomState(f.key);
+                        setFreedom(f.key); // 세션에 저장 → 다음 생성에도 그대로
+                      }}
+                    />
+                  ))}
+                </div>
+                {/* 고른 자유도가 어떤 결과를 내는지 예시로 설명 */}
+                {(() => {
+                  const f = FREEDOMS.find((x) => x.key === freedom);
+                  if (!f) return null;
+                  return (
+                    <div className="mb-5 space-y-3 rounded-2xl border-2 border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-900/50 dark:bg-emerald-950/20">
+                      <p className="text-lg font-semibold">
+                        &lsquo;{f.label}&rsquo;을(를) 고르면
+                      </p>
+                      <FreedomLine icon="ph:shuffle-duotone" label="만들 때마다 바뀌는 것" text={f.changes} />
+                      <FreedomLine icon="ph:lock-simple-duotone" label="바뀌지 않는 것" text={f.keeps} />
+                      <FreedomLine icon="ph:hand-pointing-duotone" label="이럴 때 고르세요" text={f.when} />
+                    </div>
+                  );
+                })()}
+              </>
+            )}
             <dl className="divide-y divide-neutral-200 rounded-2xl border-2 border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
               <SummaryRow label="종류" value={kind === "banner" ? "배너" : "전단지"} />
               <SummaryRow label="업종" value={bizLabel || "-"} />
@@ -897,7 +943,9 @@ export default function Studio() {
                 <SummaryRow label="참고 이미지" value="올린 이미지와 비슷하게" />
               ) : refGen ? (
                 <SummaryRow label="참고 이미지" value="최근 만든 것과 비슷하게" />
-              ) : null}
+              ) : (
+                <SummaryRow label="자유도" value={FREEDOMS.find((f) => f.key === freedom)?.label ?? freedom} />
+              )}
             </dl>
             <EstimateBar estimate={estimate} />
             {error && (
@@ -1150,6 +1198,19 @@ function EstimateBar({ estimate }: { estimate: Estimate | null }) {
           <>이 계정으로 앞으로 약 <b>{estimate.remaining_images.toLocaleString("ko-KR")}장</b></>
         )}
       </span>
+    </div>
+  );
+}
+
+// 자유도 설명 한 줄 — 아이콘 + 굵은 라벨 + 쉬운 말 설명
+function FreedomLine({ icon, label, text }: { icon: string; label: string; text: string }) {
+  return (
+    <div className="flex items-start gap-3">
+      <Icon icon={icon} className="mt-0.5 shrink-0 text-[24px] text-emerald-600 dark:text-emerald-400" />
+      <p className="text-base leading-relaxed">
+        <b className="mr-1">{label}</b>
+        <span className="text-neutral-700 dark:text-neutral-300">{text}</span>
+      </p>
     </div>
   );
 }

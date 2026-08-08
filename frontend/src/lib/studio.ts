@@ -113,6 +113,111 @@ export const FLYER_HINT =
   "제공한 한글 문구를 오탈자 없이 정확히 그대로 넣고, 없는 정보는 지어내지 마. " +
   "색은 밝고 선명하게, 누렇거나 세피아 톤은 쓰지 마.";
 
+// ───────── 매번 다른 그림이 나오게 하는 '연출 변주' ─────────
+// 이미지 API에는 seed/temperature 같은 파라미터가 없다. 같은 프롬프트를 보내면
+// 모델이 늘 자기가 가장 전형적이라고 생각하는 그림을 그린다(예: 유흥업소→왕관).
+// 그래서 매 생성마다 구도·조명·그래픽 스타일을 무작위로 바꿔 넣어 결과를 흩뜨린다.
+const COMPOSITIONS = [
+  "주인공 요소를 왼쪽에 크게 두고 오른쪽은 여백으로 비운 구도",
+  "가운데를 비우고 위아래로 요소를 나눈 대칭 구도",
+  "대각선으로 흐르는 역동적인 구도",
+  "위에서 내려다본 평면(플랫레이) 구도",
+  "가까이 클로즈업해 질감이 보이는 구도",
+  "넓은 배경 위에 작은 요소들이 흩어진 여백 많은 구도",
+];
+const LIGHTINGS = [
+  "부드러운 자연광",
+  "선명한 대비의 스튜디오 조명",
+  "따뜻한 노을빛 조명",
+  "맑고 균일한 한낮 조명",
+  "은은한 역광과 부드러운 그림자",
+];
+const STYLES = [
+  "사실적인 사진 느낌",
+  "납작한 벡터 일러스트 느낌",
+  "종이를 오려 붙인 콜라주 느낌",
+  "손그림 수채 일러스트 느낌",
+  "굵은 도형과 큰 색면을 쓴 그래픽 포스터 느낌",
+  "미니멀한 모던 그래픽 느낌",
+];
+
+function pick<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+// 자유도 — 변주를 얼마나 세게 걸지. 사용자가 고르고 세션 동안 유지된다.
+export type Freedom = "safe" | "normal" | "wild";
+export interface FreedomChoice {
+  key: Freedom;
+  icon: string;
+  label: string;
+  desc: string;
+  changes: string;   // 만들 때마다 바뀌는 것
+  keeps: string;     // 바뀌지 않는 것
+  when: string;      // 언제 고르면 좋은지
+}
+export const FREEDOMS: FreedomChoice[] = [
+  {
+    key: "safe",
+    icon: "ph:shield-check-duotone",
+    label: "안정적으로",
+    desc: "무난하고 예상되는 그림",
+    changes: "바뀌는 것이 없어요. 적어 주신 내용만 가지고 그대로 그립니다.",
+    keeps: "그림 배치도, 밝기도, 그림 그리는 방식도 매번 똑같아요.",
+    when: "마음에 든 그림과 같은 느낌으로 계속 만들고 싶을 때 고르세요. 대신 여러 번 만들어도 거의 같은 그림이 나옵니다.",
+  },
+  {
+    key: "normal",
+    icon: "ph:sliders-duotone",
+    label: "적당히 다르게",
+    desc: "추천 · 구도와 조명이 매번 바뀜",
+    changes: "그림을 어디에 놓을지 6가지, 빛을 어떻게 비출지 5가지 중에서 만들 때마다 하나씩 골라 씁니다. (예: 이번엔 왼쪽에 크게·노을빛, 다음엔 비스듬한 배치·환한 빛)",
+    keeps: "그림을 그리는 방식(사진 같은지, 그림 같은지)은 그대로예요.",
+    when: "여러 장 만들어 보고 마음에 드는 것을 고르고 싶을 때 좋아요.",
+  },
+  {
+    key: "wild",
+    icon: "ph:sparkle-duotone",
+    label: "매번 새롭게",
+    desc: "그림체까지 과감하게 바뀜",
+    changes: "위의 배치·빛에 더해, 그림 그리는 방식 6가지까지 매번 바꿉니다. (예: 이번엔 사진처럼, 다음엔 색연필 그림처럼, 그 다음엔 색종이 오려 붙인 것처럼)",
+    keeps: "적어 주신 글자와 업종만 그대로 지켜요.",
+    when: "새로운 아이디어를 폭넓게 보고 싶을 때 좋아요. 대신 만들 때마다 분위기가 많이 달라집니다.",
+  },
+];
+
+/**
+ * 생성 요청마다 붙일 변주 문구. 같은 입력이라도 매번 다른 그림이 나오게 한다.
+ * 이미지 API에는 seed·temperature가 없어서, 프롬프트를 흔드는 것이 유일한 수단이다.
+ */
+export function variationHint(freedom: Freedom): string {
+  if (freedom === "safe") return "";
+  const base = ` 이번 그림은 ${pick(COMPOSITIONS)}로, ${pick(LIGHTINGS)} 아래 그려줘.`;
+  if (freedom === "normal") return base;
+  return `${base} 그림체는 ${pick(STYLES)}으로 하고, 흔한 구성 대신 과감하고 새로운 시안으로 만들어줘.`;
+}
+
+// 자유도는 세션 동안 유지 — 다시 만들 때마다 고르지 않아도 되게.
+const FREEDOM_KEY = "ai_create.freedom";
+
+export function getFreedom(): Freedom {
+  try {
+    const v = sessionStorage.getItem(FREEDOM_KEY);
+    if (v === "safe" || v === "normal" || v === "wild") return v;
+  } catch {
+    /* 접근 불가 시 기본값 */
+  }
+  return "normal";
+}
+
+export function setFreedom(v: Freedom): void {
+  try {
+    sessionStorage.setItem(FREEDOM_KEY, v);
+  } catch {
+    /* 저장 실패는 무시 */
+  }
+}
+
 export interface Estimate {
   quality: string;
   estimated_cost_krw: number;
