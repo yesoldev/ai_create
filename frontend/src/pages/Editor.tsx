@@ -5,7 +5,14 @@ import { Canvas, StaticCanvas, IText, Rect, Circle, type FabricObject } from "fa
 import JSZip from "jszip";
 import { saveTemplate, updateTemplate, savePages, deletePage, type TemplatePage } from "../lib/library";
 import { listFolders, withDepth, type Folder } from "../lib/folders";
-import { generate, uploadRef, krw } from "../lib/studio";
+import {
+  generateWithRetry,
+  uploadRef,
+  krw,
+  errorInfo,
+  isSafetyBlocked,
+  SAFETY_FAIL_MSG,
+} from "../lib/studio";
 import { api } from "../lib/api";
 import { ConfirmDialog, useDismiss } from "../components/dialogs";
 
@@ -113,6 +120,7 @@ export default function Editor() {
   const [aiBusy, setAiBusy] = useState(false);
   const [aiStep, setAiStep] = useState(0);
   const [aiMsg, setAiMsg] = useState("");
+  const [aiRetry, setAiRetry] = useState(""); // 안전 검사 재시도 안내
   const [remaining, setRemaining] = useState<number | null | undefined>(undefined); // 이번 달 잔액
   // AI로 크기 변경 (px) — '사이즈 수정' 눌렀을 때만 입력·적용
   const [sizeEdit, setSizeEdit] = useState(false);
@@ -476,6 +484,7 @@ export default function Editor() {
     if ((!aiText.trim() && !sizeChanged) || aiBusy) return;
     setAiBusy(true);
     setAiMsg("");
+    setAiRetry("");
     try {
       // 현재 페이지 이미지를 참고로 업로드(디자인 유지)
       let refUploadId: string | undefined;
@@ -499,17 +508,22 @@ export default function Editor() {
       }
       prompt += " 없는 정보는 지어내지 마.";
 
-      const r = await generate({
-        prompt,
-        width: targetW,
-        height: targetH,
-        quality: st.quality || "medium",
-        mode: "ai_text",
-        kind: st.kind,
-        ref_upload_id: refUploadId,
-        template_id: st.templateId,
-        similarity: 4,
-      });
+      const r = await generateWithRetry(
+        {
+          prompt,
+          width: targetW,
+          height: targetH,
+          quality: st.quality || "medium",
+          mode: "ai_text",
+          kind: st.kind,
+          ref_upload_id: refUploadId,
+          template_id: st.templateId,
+          similarity: 4,
+        },
+        // 안전 검사 오탐으로 다시 만드는 중 — 진행 상황을 알려 준다
+        (tryNo, total) =>
+          setAiRetry(`안전 검사에 걸려서 다시 만들고 있어요 (${tryNo}번째 시도 / 최대 ${total}번)`),
+      );
       // 새 페이지로 추가하고 그 페이지로 이동
       const next = [...pagesRef.current, { id: r.page_id ?? null, bgUrl: r.image_url, canvasJson: null }];
       pagesRef.current = next;
@@ -525,22 +539,14 @@ export default function Editor() {
           (r.remaining_krw === null ? " (잔액 무제한)." : ` · 이번 달 남은 금액 ${krw(r.remaining_krw)}.`),
       );
     } catch (e: unknown) {
-      const err = e as { response?: { status?: number; data?: { detail?: unknown } } };
-      const raw = err?.response?.data?.detail;
-      // 422는 FastAPI 검증 오류(detail이 배열)일 수도 있어 문자열일 때만 사용한다.
-      const detail = typeof raw === "string" ? raw : undefined;
-      const status = err?.response?.status;
       setAiMsg(
-        status === 402
-          ? "이번 달 사용할 수 있는 금액을 넘었어요. 관리자에게 문의하세요."
-          : status === 422 && detail
-            ? detail // 안전 규정 차단 등, 서버가 그대로 보여줄 안내를 준 경우
-            : detail
-              ? `AI 수정 실패: ${detail}`
-              : "AI 수정에 실패했어요. 잠시 후 다시 시도해 주세요.",
+        isSafetyBlocked(e)
+          ? SAFETY_FAIL_MSG
+          : errorInfo(e, "AI 수정에 실패했어요. 잠시 후 다시 시도해 주세요.").message,
       );
     } finally {
       setAiBusy(false);
+      setAiRetry("");
     }
   }
 
@@ -901,6 +907,17 @@ export default function Editor() {
                     <span key={i} className={`h-2.5 w-2.5 rounded-full ${i <= aiStep ? "bg-emerald-500" : "bg-neutral-200 dark:bg-neutral-700"}`} />
                   ))}
                 </div>
+                {aiRetry && (
+                  <div className="mt-5 flex items-start gap-3 rounded-2xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-left dark:border-amber-500/50 dark:bg-amber-500/10">
+                    <Icon icon="ph:arrow-clockwise-bold" className="mt-0.5 shrink-0 animate-spin text-xl text-amber-600 dark:text-amber-400" />
+                    <div>
+                      <p className="text-base font-bold text-amber-800 dark:text-amber-200">{aiRetry}</p>
+                      <p className="mt-1 text-sm text-amber-700 dark:text-amber-300/90">
+                        AI 안전 검사가 멀쩡한 그림도 가끔 잘못 걸러요. 조건을 바꿔 다시 만드는 중이에요.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <>

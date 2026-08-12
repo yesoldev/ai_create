@@ -23,11 +23,15 @@ logger = logging.getLogger("generate")
 
 _MM_PER_INCH = 25.4
 
-# OpenAI 안전 필터에 막혔을 때 사용자에게 보여줄 안내(원문 영어 오류 대신).
-_MODERATION_MSG = (
-    "만들어진 그림이 OpenAI 안전 규정에 걸려 사용할 수 없었어요. "
-    "사람의 모습이나 신체를 묘사하는 표현을 빼고, 제품·매장·글자 위주로 설명을 바꿔 다시 시도해 주세요."
-)
+
+def _ai_http_error(e: openai_client.AiError) -> HTTPException:
+    """AI 오류 → 한글 메시지가 담긴 HTTP 오류.
+
+    detail은 {code, message} 형태. 프론트는 code로 분기(moderation이면 자동 재시도)하고
+    message를 그대로 보여준다. 안전 검사 차단은 422, 나머지는 502.
+    """
+    status = 422 if e.code == "moderation" else 502
+    return HTTPException(status, detail={"code": e.code, "message": e.message})
 
 # 유사도(1~4)에 따른 프롬프트 접두 — 모델에 강도 파라미터가 없어 문구로 근사(계획 §3.1)
 _SIMILARITY_PREFIX = {
@@ -60,6 +64,8 @@ class GenerateBody(BaseModel):
     name: str | None = None       # 사용자가 정한 제목(있으면 프로젝트명으로 사용)
     kind: str | None = None       # banner | flyer (문구 배치 방식 참고용)
     template_id: str | None = None  # 있으면 새 프로젝트 대신 이 프로젝트의 이미지를 갱신
+    # 안전 검사에 막혀 프론트가 다시 시도할 때 올려 보내는 단계(0=원본, 1~2=안전 조건 추가)
+    safety_level: int = Field(default=0, ge=0, le=openai_client.SAFETY_MAX_LEVEL)
     # Phase 2 확장(수용만):
     bg_preset_id: str | None = None
     ref_generation_id: str | None = None
@@ -122,19 +128,25 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
     # 3) 생성 (참고 있으면 변형 생성, 없으면 신규. 최소 픽셀 처리 후 요청 크기로 축소)
     try:
         if ref_bytes:
-            png, usage, (w, h) = await openai_client.generate_from_reference(ref_bytes, prompt, w, h, body.quality)
+            png, usage, (w, h) = await openai_client.generate_from_reference(
+                ref_bytes, prompt, w, h, body.quality, safety_level=body.safety_level
+            )
         else:
-            png, usage, (w, h) = await openai_client.generate_image(prompt, w, h, body.quality)
-    except openai_client.ModerationBlocked:
-        logger.warning("안전필터 차단(재시도 실패) user=%s", user.get("id"))
-        raise HTTPException(422, _MODERATION_MSG)
-    except Exception as e:  # noqa: BLE001
-        # 실제 원인(OpenAI 에러/타임아웃 등)을 서버 로그에 남긴다(진단용).
-        logger.exception(
-            "이미지 생성 실패 user=%s ref=%s size=%sx%s quality=%s",
-            user.get("id"), bool(ref_bytes), w, h, body.quality,
+            png, usage, (w, h) = await openai_client.generate_image(
+                prompt, w, h, body.quality, safety_level=body.safety_level
+            )
+    except openai_client.AiError as e:
+        # 원문 오류는 openai_client가 이미 로그로 남겼다. 여기선 요청 맥락만 덧붙인다.
+        logger.warning(
+            "이미지 생성 실패(%s) user=%s ref=%s size=%sx%s quality=%s safety=%s",
+            e.code, user.get("id"), bool(ref_bytes), w, h, body.quality, body.safety_level,
         )
-        raise HTTPException(502, f"이미지 생성 실패: {e}")
+        raise _ai_http_error(e) from e
+    except Exception as e:  # noqa: BLE001  (이미지 후처리 등 예상 밖 오류)
+        logger.exception("이미지 생성 실패(예상 밖) user=%s", user.get("id"))
+        raise _ai_http_error(
+            openai_client.AiError("그림을 만드는 중 문제가 생겼어요. 잠시 후 다시 시도해 주세요.")
+        ) from e
 
     # 4) 실제 비용
     cost_krw = cost.actual_cost_krw(usage) or est
@@ -222,6 +234,7 @@ class InpaintBody(BaseModel):
     mask_png_base64: str
     prompt: str
     quality: str = "medium"
+    safety_level: int = Field(default=0, ge=0, le=openai_client.SAFETY_MAX_LEVEL)
 
 
 @router.post("/generate/inpaint")
@@ -244,13 +257,17 @@ async def inpaint(body: InpaintBody, user: dict = Depends(get_current_user)):
     mask = base64.b64decode(body.mask_png_base64)
 
     try:
-        png, usage = await openai_client.inpaint_image(src, mask, body.prompt, body.quality)
-    except openai_client.ModerationBlocked:
-        logger.warning("안전필터 차단(부분 재생성) user=%s", user.get("id"))
-        raise HTTPException(422, _MODERATION_MSG)
+        png, usage = await openai_client.inpaint_image(
+            src, mask, body.prompt, body.quality, safety_level=body.safety_level
+        )
+    except openai_client.AiError as e:
+        logger.warning("부분 재생성 실패(%s) user=%s", e.code, user.get("id"))
+        raise _ai_http_error(e) from e
     except Exception as e:  # noqa: BLE001
-        logger.exception("부분 재생성 실패 user=%s", user.get("id"))
-        raise HTTPException(502, f"부분 재생성 실패: {e}")
+        logger.exception("부분 재생성 실패(예상 밖) user=%s", user.get("id"))
+        raise _ai_http_error(
+            openai_client.AiError("고쳐 그리는 중 문제가 생겼어요. 잠시 후 다시 시도해 주세요.")
+        ) from e
 
     cost_krw = cost.actual_cost_krw(usage)
     gid = str(uuid.uuid4())
@@ -280,7 +297,11 @@ class CopyBody(BaseModel):
 
 @router.post("/copywrite")
 async def copywrite(body: CopyBody, user: dict = Depends(get_current_user)):
-    candidates, usage = await openai_client.copywrite(body.business, body.event, body.tone)
+    try:
+        candidates, usage = await openai_client.copywrite(body.business, body.event, body.tone)
+    except openai_client.AiError as e:
+        logger.warning("문구 추천 실패(%s) user=%s", e.code, user.get("id"))
+        raise _ai_http_error(e) from e
     cost_krw = cost.copy_cost_krw(usage)
     with get_conn() as conn:
         if cost_krw > 0:

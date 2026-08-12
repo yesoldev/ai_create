@@ -265,7 +265,73 @@ export interface GeneratePayload {
   ref_generation_id?: string;
   ref_upload_id?: string;
   similarity?: number; // 1~4
+  safety_level?: number; // 안전 검사 재시도 단계(0~2)
 }
+
+// ───────── 오류 안내(전부 한글) ─────────
+// 백엔드는 AI 오류를 detail={code,message} 로 준다. 그 외(네트워크·검증 오류 등)는
+// 여기서 상태코드로 한글 문장을 만든다. 영어 원문은 절대 사용자에게 보이지 않게 한다.
+export interface ApiErrorInfo {
+  code: string;
+  message: string;
+  status?: number;
+}
+
+const BY_STATUS: Record<number, string> = {
+  400: "요청 내용에 문제가 있어요. 입력한 값을 확인하고 다시 시도해 주세요.",
+  401: "로그인이 풀렸어요. 다시 로그인해 주세요.",
+  403: "이 작업을 할 권한이 없어요. 관리자에게 문의해 주세요.",
+  404: "찾으시는 자료가 없어요. 목록에서 다시 선택해 주세요.",
+  402: "이번 달 사용할 수 있는 금액을 넘었어요. 관리자에게 문의하세요.",
+  413: "파일 용량이 너무 커요. 더 작은 사진으로 다시 시도해 주세요.",
+  429: "지금 이용자가 많아요. 1~2분 뒤에 다시 시도해 주세요.",
+};
+
+export function errorInfo(e: unknown, fallback = "문제가 생겼어요. 잠시 후 다시 시도해 주세요."): ApiErrorInfo {
+  const err = e as {
+    code?: string;
+    response?: { status?: number; data?: { detail?: unknown } };
+  };
+  const status = err?.response?.status;
+
+  if (!err?.response) {
+    // 서버까지 못 갔을 때 (끊긴 네트워크 / 타임아웃)
+    return err?.code === "ECONNABORTED"
+      ? { code: "timeout", message: "시간이 너무 오래 걸려 중단됐어요. 잠시 후 다시 시도해 주세요." }
+      : { code: "network", message: "인터넷 연결이 불안정해요. 연결을 확인하고 다시 시도해 주세요." };
+  }
+
+  const detail = err.response.data?.detail;
+  // 백엔드 AI 오류: {code, message}
+  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    const d = detail as { code?: string; message?: string };
+    if (d.message) return { code: d.code || "server", message: d.message, status };
+  }
+  // 한글 문자열 detail은 그대로 사용 (백엔드 메시지는 전부 한글)
+  if (typeof detail === "string" && detail.trim()) {
+    return { code: "detail", message: detail, status };
+  }
+  // FastAPI 검증 오류(detail이 배열)
+  if (Array.isArray(detail)) {
+    return { code: "validation", message: "입력한 내용에 문제가 있어요. 값을 확인하고 다시 시도해 주세요.", status };
+  }
+  if (status && BY_STATUS[status]) return { code: `http_${status}`, message: BY_STATUS[status], status };
+  if (status && status >= 500) {
+    return { code: "server", message: "서버에 일시적인 문제가 있어요. 잠시 후 다시 시도해 주세요.", status };
+  }
+  return { code: "unknown", message: fallback, status };
+}
+
+// 안전 검사에 걸린 오류인가 (자동 재시도 대상)
+export function isSafetyBlocked(e: unknown): boolean {
+  return errorInfo(e).code === "moderation";
+}
+
+// 안전 검사 재시도: 총 3번(0 → 1 → 2단계)까지 안전 조건을 강화하며 다시 만든다.
+export const SAFETY_TRIES = 3;
+export const SAFETY_FAIL_MSG =
+  "여러 번 다시 시도했지만 OpenAI 안전 검사를 통과하지 못했어요. " +
+  "사람 모습을 묘사하는 표현을 빼고 제품·매장·글자 위주로 설명을 바꾼 뒤 다시 시도해 주세요.";
 
 // AI 문구 추천 (업종/행사 → 후보 3~5개 + 비용/잔액)
 export interface CopyResult {
@@ -293,6 +359,22 @@ export async function generate(p: GeneratePayload): Promise<GenerateResult> {
     dpi: 300,
   });
   return data;
+}
+
+/** 안전 검사(오탐)에 걸리면 안전 조건을 강화해 자동으로 다시 만든다.
+ *  onRetry로 "다시 시도 중" 안내를 화면에 띄울 수 있게 알려준다. */
+export async function generateWithRetry(
+  p: GeneratePayload,
+  onRetry?: (tryNo: number, total: number) => void,
+): Promise<GenerateResult> {
+  for (let level = 0; ; level++) {
+    try {
+      return await generate({ ...p, safety_level: level });
+    } catch (e) {
+      if (!isSafetyBlocked(e) || level >= SAFETY_TRIES - 1) throw e;
+      onRetry?.(level + 2, SAFETY_TRIES); // 지금부터 몇 번째 시도인지
+    }
+  }
 }
 
 export function krw(n: number | null | undefined): string {

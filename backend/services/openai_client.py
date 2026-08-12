@@ -6,7 +6,16 @@ import io
 import logging
 from collections.abc import Awaitable, Callable
 
-from openai import AsyncOpenAI
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    AsyncOpenAI,
+    AuthenticationError,
+    BadRequestError,
+    PermissionDeniedError,
+    RateLimitError,
+)
 from PIL import Image
 
 from config import (
@@ -22,21 +31,43 @@ client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 logger = logging.getLogger("openai_client")
 
 
-class ModerationBlocked(Exception):
-    """OpenAI 안전 필터가 결과물을 막은 경우(재시도까지 모두 실패)."""
+class AiError(Exception):
+    """사용자에게 그대로 보여줄 한글 메시지를 담은 AI 호출 오류.
+
+    code: 프론트가 분기하는 용도(moderation이면 자동 재시도 대상).
+    """
+
+    def __init__(self, message: str, *, code: str = "unknown") -> None:
+        super().__init__(message)
+        self.message = message
+        self.code = code
 
 
-# 안전 필터 대응 문구 — 출력 단계 차단은 결과 이미지 때문에 발생하고 재현성이 낮아,
+class ModerationBlocked(AiError):
+    """OpenAI 안전 검사(입력/출력)가 막은 경우. 재시도하면 통과하는 오탐이 잦다."""
+
+    def __init__(self, message: str = "OpenAI 안전 검사에 걸렸어요.") -> None:
+        super().__init__(message, code="moderation")
+
+
+# 안전 검사 대응 문구 — 출력 단계 차단은 '결과 이미지'를 보고 일어나서 재현성이 낮다.
 # 같은 프롬프트에 안전 조건을 덧붙여 다시 시도하면 대개 통과한다.
-_SAFETY_GUARD = (
+# safety_level(0/1/2)로 강도를 올린다. 재시도는 사용자에게 진행 상황을 보여주려고
+# 프론트가 주도한다(백엔드가 조용히 3번 돌면 90초 동안 아무 안내도 못 준다).
+SAFETY_GUARDS: tuple[str, ...] = (
+    "",
     "\n\n[필수 조건] 전 연령이 볼 수 있는 건전한 상업 광고 이미지로 만든다. "
     "인물이 등장한다면 반드시 옷을 단정하게 갖춰 입고 노출이 전혀 없어야 하며, "
-    "선정적이거나 신체 부위를 강조하는 포즈·구도·클로즈업을 쓰지 않는다."
-)
-_SAFETY_GUARD_STRONG = (
+    "선정적이거나 신체 부위를 강조하는 포즈·구도·클로즈업을 쓰지 않는다.",
     "\n\n[필수 조건] 사람(인물)을 절대 그리지 않는다. 제품·사물·배경·도형·글자만으로 "
-    "구성된 건전한 상업 광고 이미지로 만든다."
+    "구성된 건전한 상업 광고 이미지로 만든다.",
 )
+SAFETY_MAX_LEVEL = len(SAFETY_GUARDS) - 1
+
+
+def with_guard(prompt: str, safety_level: int = 0) -> str:
+    """안전 검사 재시도 단계에 맞는 안전 조건 문구를 덧붙인다."""
+    return prompt + SAFETY_GUARDS[max(0, min(safety_level, SAFETY_MAX_LEVEL))]
 
 
 def _is_moderation_block(e: Exception) -> bool:
@@ -46,19 +77,54 @@ def _is_moderation_block(e: Exception) -> bool:
     return "moderation_blocked" in msg or "safety system" in msg
 
 
-async def _with_safety_retry(call: Callable[[str], Awaitable], prompt: str, what: str):
-    """안전 필터에 막히면 안전 조건을 덧붙여 최대 3회까지 재시도."""
-    attempts = (prompt, prompt + _SAFETY_GUARD, prompt + _SAFETY_GUARD_STRONG)
-    last: Exception | None = None
-    for i, p in enumerate(attempts, start=1):
-        try:
-            return await call(p)
-        except Exception as e:  # noqa: BLE001
-            if not _is_moderation_block(e):
-                raise
-            last = e
-            logger.warning("안전필터 차단(%s) — 재시도 %d/%d", what, i, len(attempts))
-    raise ModerationBlocked(str(last)) from last
+def _translate(e: Exception) -> AiError:
+    """OpenAI SDK 예외 → 사용자용 한글 메시지. 원문은 호출부에서 로그로 남긴다."""
+    if _is_moderation_block(e):
+        return ModerationBlocked()
+    if isinstance(e, RateLimitError):
+        return AiError(
+            "지금 AI 서버에 요청이 많이 몰려 있어요. 1~2분 뒤에 다시 시도해 주세요.",
+            code="rate_limit",
+        )
+    if isinstance(e, APITimeoutError):
+        return AiError(
+            "AI 서버 응답이 너무 오래 걸려 중단됐어요. 잠시 후 다시 시도해 주세요.",
+            code="timeout",
+        )
+    if isinstance(e, APIConnectionError):
+        return AiError(
+            "AI 서버에 연결하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.",
+            code="connection",
+        )
+    if isinstance(e, (AuthenticationError, PermissionDeniedError)):
+        return AiError(
+            "AI 서비스 이용 권한에 문제가 있어요. 관리자에게 문의해 주세요.",
+            code="auth",
+        )
+    if isinstance(e, BadRequestError):
+        return AiError(
+            "AI가 이 요청을 처리하지 못했어요. 설명을 조금 더 쉽고 짧게 바꿔 다시 시도해 주세요.",
+            code="bad_request",
+        )
+    if isinstance(e, APIStatusError) and e.status_code >= 500:
+        return AiError(
+            "AI 서버에 일시적인 문제가 있어요. 잠시 후 다시 시도해 주세요.",
+            code="server",
+        )
+    return AiError("그림을 만드는 중 문제가 생겼어요. 잠시 후 다시 시도해 주세요.", code="unknown")
+
+
+async def _call(what: str, factory: Callable[[], Awaitable]):
+    """OpenAI 호출을 감싸 원문은 로그로, 사용자에겐 한글 메시지로."""
+    try:
+        return await factory()
+    except Exception as e:  # noqa: BLE001
+        err = _translate(e)
+        if err.code == "moderation":
+            logger.warning("안전검사 차단(%s): %s", what, e)
+        else:
+            logger.exception("OpenAI 호출 실패(%s)", what)
+        raise err from e
 
 
 def _usage_dict(resp) -> dict:
@@ -102,22 +168,23 @@ async def generate_image(
     height: int,
     quality: str = "medium",
     model: str | None = None,
+    safety_level: int = 0,
 ) -> tuple[bytes, dict, tuple[int, int]]:
     """이미지 생성. 반환: (png_bytes, usage_dict, (final_w, final_h)).
 
     gpt-image-2 최소 픽셀 제약 때문에 비율 유지한 채 생성 후 요청 크기로 축소.
+    safety_level은 안전 검사 재시도 단계(0~2) — 높을수록 강한 안전 조건을 덧붙인다.
     """
     gen_w, gen_h, fin_w, fin_h = plan_size(width, height)
-    resp = await _with_safety_retry(
-        lambda p: client.images.generate(
+    resp = await _call(
+        "생성",
+        lambda: client.images.generate(
             model=model or IMAGE_MODEL,
-            prompt=p,
+            prompt=with_guard(prompt, safety_level),
             size=f"{gen_w}x{gen_h}",
             quality=quality,
             n=1,
         ),
-        prompt,
-        "생성",
     )
     usage = _usage_dict(resp)
     png = base64.b64decode(resp.data[0].b64_json)
@@ -133,6 +200,7 @@ async def generate_from_reference(
     height: int,
     quality: str = "medium",
     model: str | None = None,
+    safety_level: int = 0,
 ) -> tuple[bytes, dict, tuple[int, int]]:
     """참고 이미지 기반 생성(변형). 참고 이미지를 입력으로 edit 호출 → 요청 크기로 축소.
 
@@ -146,17 +214,16 @@ async def generate_from_reference(
     buf.name = "reference.png"
     buf.seek(0)
 
-    def _call(p: str):
-        buf.seek(0)  # 재시도 시 스트림을 처음부터 다시 읽도록
-        return client.images.edit(
+    resp = await _call(
+        "참고이미지 변형",
+        lambda: client.images.edit(
             model=model or IMAGE_MODEL,
             image=buf,
-            prompt=p,
+            prompt=with_guard(prompt, safety_level),
             size=f"{gen_w}x{gen_h}",
             n=1,
-        )
-
-    resp = await _with_safety_retry(_call, prompt, "참고이미지 변형")
+        ),
+    )
     usage = _usage_dict(resp)
     png = base64.b64decode(resp.data[0].b64_json)
     if (gen_w, gen_h) != (fin_w, fin_h):
@@ -170,6 +237,7 @@ async def inpaint_image(
     prompt: str,
     quality: str = "medium",
     model: str | None = None,
+    safety_level: int = 0,
 ) -> tuple[bytes, dict]:
     """마스크 인페인팅(깨진 텍스트 부분 재생성). mask는 재생성할 영역이 투명(알파=0)."""
     img_f = io.BytesIO(image_png)
@@ -177,18 +245,16 @@ async def inpaint_image(
     mask_f = io.BytesIO(mask_png)
     mask_f.name = "mask.png"
 
-    def _call(p: str):
-        img_f.seek(0)
-        mask_f.seek(0)
-        return client.images.edit(
+    resp = await _call(
+        "부분 재생성",
+        lambda: client.images.edit(
             model=model or IMAGE_MODEL,
             image=img_f,
             mask=mask_f,
-            prompt=p,
+            prompt=with_guard(prompt, safety_level),
             n=1,
-        )
-
-    resp = await _with_safety_retry(_call, prompt, "부분 재생성")
+        ),
+    )
     b64 = resp.data[0].b64_json
     usage = _usage_dict(resp)
     return base64.b64decode(b64), usage
@@ -196,21 +262,24 @@ async def inpaint_image(
 
 async def copywrite(business: str, event: str, tone: str = "밝고 친근하게") -> tuple[list[str], dict]:
     """업종/이벤트/톤 → 홍보 문구 후보 3~5개. 반환: (후보목록, usage_dict)."""
-    resp = await client.chat.completions.create(
-        model=TEXT_MODEL,
-        messages=[
-            {
-                "role": "system",
-                "content": "너는 한국어 홍보물 카피라이터다. 짧고 임팩트 있는 문구를 만든다. "
-                "각 후보는 한 줄, 번호 없이 줄바꿈으로만 구분해 5개 출력.",
-            },
-            {
-                "role": "user",
-                "content": f"업종: {business}\n이벤트/행사: {event}\n톤: {tone}\n"
-                "배너/전단지 헤드라인 문구 5개를 제안해줘.",
-            },
-        ],
-        temperature=0.9,
+    resp = await _call(
+        "문구 추천",
+        lambda: client.chat.completions.create(
+            model=TEXT_MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "너는 한국어 홍보물 카피라이터다. 짧고 임팩트 있는 문구를 만든다. "
+                    "각 후보는 한 줄, 번호 없이 줄바꿈으로만 구분해 5개 출력.",
+                },
+                {
+                    "role": "user",
+                    "content": f"업종: {business}\n이벤트/행사: {event}\n톤: {tone}\n"
+                    "배너/전단지 헤드라인 문구 5개를 제안해줘.",
+                },
+            ],
+            temperature=0.9,
+        ),
     )
     text = resp.choices[0].message.content or ""
     candidates = [ln.strip(" -•\t") for ln in text.splitlines() if ln.strip()][:5]

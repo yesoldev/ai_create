@@ -17,7 +17,10 @@ import {
   fetchDefaultSizes,
   toPx,
   fetchEstimate,
-  generate,
+  generateWithRetry,
+  errorInfo,
+  isSafetyBlocked,
+  SAFETY_FAIL_MSG,
   uploadRef,
   copywrite,
   krw,
@@ -138,6 +141,7 @@ export default function Studio() {
   const [estimate, setEstimate] = useState<Estimate | null>(null);
   const [busy, setBusy] = useState(false);
   const [busyStep, setBusyStep] = useState(0);
+  const [retryNote, setRetryNote] = useState(""); // 안전 검사 재시도 안내
   const [error, setError] = useState("");
   const [result, setResult] = useState<GenerateResult | null>(null);
 
@@ -212,6 +216,7 @@ export default function Studio() {
     if (!effW || !effH) return;
     setBusy(true);
     setError("");
+    setRetryNote("");
     try {
       // 참고 이미지: "비슷하게 다시 만들기"(인자) 우선, 아니면 업로드/최근이미지
       let refUploadId: string | undefined;
@@ -232,38 +237,33 @@ export default function Studio() {
       const varied = hasRef ? "" : variationHint(freedom);
       const fullPrompt = `${bizLabel ? `[업종: ${bizLabel}] ` : ""}${description}.${extra}${colorHint} ${hint}${varied}`;
       pushRecentPrompt(description); // 다음에 재사용할 수 있게 저장
-      const r = await generate({
-        prompt: fullPrompt,
-        width: effW,
-        height: effH,
-        quality,
-        mode: "ai_text",
-        text_content: wantedText || undefined,
-        // 프로젝트 제목: 입력한 제목 > 업체명 (문구 전체가 제목으로 들어가지 않게)
-        name: title.trim() || bizName.trim() || undefined,
-        kind: kind || undefined,
-        ref_generation_id: refId,
-        ref_upload_id: refUploadId,
-        similarity: hasRef ? 2 : undefined,
-      });
+      const r = await generateWithRetry(
+        {
+          prompt: fullPrompt,
+          width: effW,
+          height: effH,
+          quality,
+          mode: "ai_text",
+          text_content: wantedText || undefined,
+          // 프로젝트 제목: 입력한 제목 > 업체명 (문구 전체가 제목으로 들어가지 않게)
+          name: title.trim() || bizName.trim() || undefined,
+          kind: kind || undefined,
+          ref_generation_id: refId,
+          ref_upload_id: refUploadId,
+          similarity: hasRef ? 2 : undefined,
+        },
+        // 안전 검사 오탐으로 다시 만드는 중 — 화면에 알려 준다
+        (tryNo, total) => {
+          setRetryNote(`안전 검사에 걸려서 다시 만들고 있어요 (${tryNo}번째 시도 / 최대 ${total}번)`);
+          setBusyStep(0);
+        },
+      );
       setResult(r);
     } catch (e: unknown) {
-      const err = e as { response?: { status?: number; data?: { detail?: unknown } } };
-      const raw = err?.response?.data?.detail;
-      // 422는 FastAPI 검증 오류(detail이 배열)일 수도 있어 문자열일 때만 사용한다.
-      const detail = typeof raw === "string" ? raw : undefined;
-      const status = err?.response?.status;
-      setError(
-        status === 402
-          ? "이번 달 사용할 수 있는 금액을 넘었어요. 관리자에게 문의하세요."
-          : status === 422 && detail
-            ? detail // 안전 규정 차단 등, 서버가 그대로 보여줄 안내를 준 경우
-            : detail
-              ? `이미지를 만들지 못했어요: ${detail}`
-              : "이미지를 만들지 못했어요. 잠시 후 다시 시도해 주세요.",
-      );
+      setError(isSafetyBlocked(e) ? SAFETY_FAIL_MSG : errorInfo(e).message);
     } finally {
       setBusy(false);
+      setRetryNote("");
     }
   }
 
@@ -527,6 +527,17 @@ export default function Studio() {
           <p className="mt-2 text-lg text-neutral-500 dark:text-neutral-400">
             30초쯤 걸려요. 잠시만 기다려 주세요.
           </p>
+          {retryNote && (
+            <div className="mt-5 flex items-start gap-3 rounded-2xl border-2 border-amber-300 bg-amber-50 px-5 py-4 text-left dark:border-amber-500/50 dark:bg-amber-500/10">
+              <Icon icon="ph:arrow-clockwise-bold" className="mt-0.5 shrink-0 animate-spin text-2xl text-amber-600 dark:text-amber-400" />
+              <div>
+                <p className="text-lg font-bold text-amber-800 dark:text-amber-200">{retryNote}</p>
+                <p className="mt-1 text-base text-amber-700 dark:text-amber-300/90">
+                  AI 안전 검사가 멀쩡한 그림도 가끔 잘못 걸러요. 조건을 바꿔 다시 만드는 중이니 조금만 더 기다려 주세요.
+                </p>
+              </div>
+            </div>
+          )}
           {/* 진행 점 */}
           <div className="mt-5 flex gap-2">
             {LOADING_STEPS.map((_, i) => (
