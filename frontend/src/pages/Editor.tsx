@@ -3,7 +3,14 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "@iconify/react";
 import { Canvas, StaticCanvas, IText, Rect, Circle, type FabricObject } from "fabric";
 import JSZip from "jszip";
-import { saveTemplate, updateTemplate, savePages, deletePage, type TemplatePage } from "../lib/library";
+import {
+  saveTemplate,
+  updateTemplate,
+  savePages,
+  deletePage,
+  replacePageImage,
+  type TemplatePage,
+} from "../lib/library";
 import { listFolders, withDepth, type Folder } from "../lib/folders";
 import {
   generateWithRetry,
@@ -38,6 +45,23 @@ interface PageItem {
 }
 
 type Fmt = "png" | "jpg";
+
+// 자르기 — 표시(화면) 좌표 기준 사각형과 잡은 지점
+interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+type Grip = "move" | "nw" | "ne" | "sw" | "se";
+
+const MIN_CROP = 40; // 표시 기준 최소 크기(px)
+const CROP_RATIOS: { label: string; r: number | null }[] = [
+  { label: "자유롭게", r: null },
+  { label: "정사각형", r: 1 },
+  { label: "가로형", r: 4 / 3 },
+  { label: "세로형", r: 3 / 4 },
+];
 
 function today(): string {
   const d = new Date();
@@ -75,6 +99,7 @@ export default function Editor() {
   const st = (loc.state || {}) as EditorState;
 
   const canvasEl = useRef<HTMLCanvasElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null); // 그림 영역(자르기 때 화면에 보이게)
   const fabricRef = useRef<Canvas | null>(null);
   const bgImgRef = useRef<HTMLImageElement | null>(null); // 현재 페이지 원본(합성용)
   const natSize = useRef({ w: 1024, h: 1024 });
@@ -126,6 +151,13 @@ export default function Editor() {
   const [sizeEdit, setSizeEdit] = useState(false);
   const [aiW, setAiW] = useState(0);
   const [aiH, setAiH] = useState(0);
+  // 이미지 자르기
+  const [cropOn, setCropOn] = useState(false);
+  const [cropBusy, setCropBusy] = useState(false);
+  const [cropMsg, setCropMsg] = useState("");
+  const [cropRatio, setCropRatio] = useState<number | null>(null); // null = 자유
+  const [crop, setCrop] = useState<Box>({ x: 0, y: 0, w: 0, h: 0 }); // 표시 좌표
+  const [cropAskOpen, setCropAskOpen] = useState(false);
 
   useEffect(() => {
     listFolders().then(setFolders).catch(() => {});
@@ -474,6 +506,152 @@ export default function Editor() {
     await showPage(Math.min(idx, next.length - 1), false);
   }
 
+  // ───────── 이미지 자르기 ─────────
+  // 표시 영역 안으로 가두기(최소 크기 보장)
+  function clampBox(b: Box): Box {
+    const w = Math.min(Math.max(b.w, MIN_CROP), disp.w);
+    const h = Math.min(Math.max(b.h, MIN_CROP), disp.h);
+    return {
+      w,
+      h,
+      x: Math.min(Math.max(b.x, 0), disp.w - w),
+      y: Math.min(Math.max(b.y, 0), disp.h - h),
+    };
+  }
+
+  // 중심을 유지한 채 비율에 맞추기
+  function fitRatio(b: Box, r: number | null): Box {
+    if (!r) return clampBox(b);
+    const cx = b.x + b.w / 2;
+    const cy = b.y + b.h / 2;
+    let w = Math.min(b.w, disp.w);
+    let h = w / r;
+    if (h > disp.h) {
+      h = disp.h;
+      w = h * r;
+    }
+    return clampBox({ x: cx - w / 2, y: cy - h / 2, w, h });
+  }
+
+  // 잡은 모서리의 반대쪽 꼭짓점을 고정한 채 크기 조절
+  function resizeBox(start: Box, grip: Grip, dx: number, dy: number): Box {
+    const left = grip === "nw" || grip === "sw";
+    const top = grip === "nw" || grip === "ne";
+    const ax = left ? start.x + start.w : start.x; // 고정 x
+    const ay = top ? start.y + start.h : start.y;  // 고정 y
+    const px = Math.min(Math.max((left ? start.x : start.x + start.w) + dx, 0), disp.w);
+    const py = Math.min(Math.max((top ? start.y : start.y + start.h) + dy, 0), disp.h);
+    let w = Math.abs(px - ax);
+    let h = Math.abs(py - ay);
+    if (cropRatio) {
+      // 고정점에서 뻗을 수 있는 최대 크기 안에서 비율 유지
+      const maxW = px < ax ? ax : disp.w - ax;
+      const maxH = py < ay ? ay : disp.h - ay;
+      w = Math.max(Math.min(w, maxW, maxH * cropRatio), MIN_CROP);
+      h = w / cropRatio;
+    } else {
+      w = Math.max(w, MIN_CROP);
+      h = Math.max(h, MIN_CROP);
+    }
+    return clampBox({ x: px < ax ? ax - w : ax, y: py < ay ? ay - h : ay, w, h });
+  }
+
+  function startCropDrag(e: React.PointerEvent, grip: Grip) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (cropBusy) return;
+    const start = { ...crop };
+    const sx = e.clientX;
+    const sy = e.clientY;
+    const onMove = (ev: PointerEvent) => {
+      const dx = ev.clientX - sx;
+      const dy = ev.clientY - sy;
+      setCrop(
+        grip === "move"
+          ? clampBox({ ...start, x: start.x + dx, y: start.y + dy })
+          : resizeBox(start, grip, dx, dy),
+      );
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
+  function openCrop() {
+    const c = fabricRef.current;
+    if (!c || !bgUrl || !disp.w) return;
+    c.discardActiveObject();
+    c.renderAll();
+    setCropMsg("");
+    setCropRatio(null);
+    setCrop({ x: disp.w * 0.1, y: disp.h * 0.1, w: disp.w * 0.8, h: disp.h * 0.8 });
+    setCropOn(true);
+    // 모바일에선 그림이 화면 아래로 밀려 보이지 않는다 → 그림을 화면 가운데로
+    setTimeout(() => stageRef.current?.scrollIntoView({ block: "center", behavior: "smooth" }), 60);
+  }
+
+  // 자를 영역을 원본 픽셀로 환산
+  function cropInPixels(): Box {
+    const sx = natSize.current.w / (disp.w || 1);
+    const sy = natSize.current.h / (disp.h || 1);
+    return {
+      x: Math.round(crop.x * sx),
+      y: Math.round(crop.y * sy),
+      w: Math.max(16, Math.round(crop.w * sx)),
+      h: Math.max(16, Math.round(crop.h * sy)),
+    };
+  }
+
+  async function applyCrop() {
+    const c = fabricRef.current;
+    const img = bgImgRef.current;
+    if (!c || !img || cropBusy) return;
+    setCropBusy(true);
+    setCropMsg("");
+    try {
+      const px = cropInPixels();
+      const off = document.createElement("canvas");
+      off.width = px.w;
+      off.height = px.h;
+      off.getContext("2d")!.drawImage(img, px.x, px.y, px.w, px.h, 0, 0, px.w, px.h);
+      const blob = await new Promise<Blob>((r) => off.toBlob((b) => r(b!), "image/png"));
+
+      // 글자·도형도 잘려 나간 만큼 같이 이동(같은 자리에 남게)
+      c.getObjects().forEach((o) => {
+        o.set({ left: (o.left || 0) - px.x, top: (o.top || 0) - px.y });
+        o.setCoords();
+      });
+
+      const page = pagesRef.current[activeRef.current];
+      const canSave = !!st.templateId && !!page.id;
+      let url: string;
+      if (canSave) {
+        url = (await replacePageImage(st.templateId!, page.id!, blob)).image_url;
+      } else {
+        url = URL.createObjectURL(blob); // 아직 저장 안 된 홍보물 — 이 화면에서만 적용
+      }
+      page.bgUrl = url;
+      page.canvasJson = c.toJSON() as Record<string, unknown>;
+      setPages([...pagesRef.current]);
+      setCropOn(false);
+      setDirty(true);
+      await showPage(activeRef.current, false); // 잘린 크기로 다시 표시
+      if (canSave) {
+        await autoSavePages();
+        setSaveMsg(`사진을 잘랐어요. (${px.w}×${px.h}px)`);
+      } else {
+        setSaveMsg("사진을 잘랐어요. 아직 보관함에 저장되지 않은 홍보물이라 이 화면에서만 적용돼요.");
+      }
+    } catch (e: unknown) {
+      setCropMsg(errorInfo(e, "자르기에 실패했어요. 다시 시도해 주세요.").message);
+    } finally {
+      setCropBusy(false);
+    }
+  }
+
   // AI로 이미지의 글자를 수정/추가 — 현재 페이지를 참고해 '새 페이지'로 추가
   async function runAiEdit() {
     const cur = natSize.current;
@@ -673,18 +851,20 @@ export default function Editor() {
               setAiH(natSize.current.h);
               setAiOpen(true);
             }}
+            disabled={cropOn}
             className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
           >
             <Icon icon="ph:magic-wand-bold" /> AI로 수정
           </button>
-          <button onClick={() => save("png")} className={`${btn} bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-200`}>
+          {/* 자르기 중 내려받으면 자르기 전 그림이 나가므로 잠근다 */}
+          <button onClick={() => save("png")} disabled={cropOn} className={`${btn} bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-200`}>
             <Icon icon="ph:download-simple-bold" /> PNG
           </button>
-          <button onClick={() => save("jpg")} className={`${btn} bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-200`}>
+          <button onClick={() => save("jpg")} disabled={cropOn} className={`${btn} bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-200`}>
             <Icon icon="ph:download-simple-bold" /> JPG
           </button>
           {pages.length > 1 && (
-            <button onClick={() => downloadAll("png")} disabled={zipBusy} className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}>
+            <button onClick={() => downloadAll("png")} disabled={zipBusy || cropOn} className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}>
               <Icon icon={zipBusy ? "ph:spinner-gap-bold" : "ph:package-bold"} className={zipBusy ? "animate-spin" : ""} /> 전체 ZIP
             </button>
           )}
@@ -804,22 +984,113 @@ export default function Editor() {
         </div>
       )}
 
+      {/* 자르기 중에는 글자·도형 편집을 잠근다(자르는 그림 위에 실수로 얹지 않게) */}
       <div className="flex flex-wrap items-center gap-2 border-b border-neutral-200 bg-white px-4 py-2 dark:border-neutral-800 dark:bg-neutral-900">
-        <button onClick={addText} className={tool}><Icon icon="ph:text-t-bold" /> 글자 넣기</button>
-        <button onClick={addRect} className={tool}><Icon icon="ph:square-bold" /> 네모</button>
-        <button onClick={addCircle} className={tool}><Icon icon="ph:circle-bold" /> 동그라미</button>
-        <label className={`${tool} cursor-pointer`}>
+        <button onClick={addText} disabled={cropOn} className={tool}><Icon icon="ph:text-t-bold" /> 글자 넣기</button>
+        <button onClick={addRect} disabled={cropOn} className={tool}><Icon icon="ph:square-bold" /> 네모</button>
+        <button onClick={addCircle} disabled={cropOn} className={tool}><Icon icon="ph:circle-bold" /> 동그라미</button>
+        <label className={`${tool} cursor-pointer ${cropOn ? "pointer-events-none opacity-40" : ""}`}>
           <Icon icon="ph:palette-bold" /> 색
-          <input type="color" value={color} onChange={(e) => applyColor(e.target.value)} className="ml-1 h-7 w-8 cursor-pointer rounded border-0 bg-transparent p-0" />
+          <input type="color" value={color} onChange={(e) => applyColor(e.target.value)} disabled={cropOn} className="ml-1 h-7 w-8 cursor-pointer rounded border-0 bg-transparent p-0" />
         </label>
-        <button onClick={fillSel} disabled={!hasSelection} className={tool}><Icon icon="ph:paint-bucket-bold" /> 채우기</button>
-        <button onClick={() => resizeText(1.2)} disabled={!hasSelection} className={tool}><Icon icon="ph:text-aa-bold" /> 크게</button>
-        <button onClick={() => resizeText(0.85)} disabled={!hasSelection} className={tool}><Icon icon="ph:text-t-bold" /> 작게</button>
-        <button onClick={removeSel} disabled={!hasSelection} className={tool}><Icon icon="ph:trash-bold" /> 삭제</button>
+        <button onClick={fillSel} disabled={!hasSelection || cropOn} className={tool}><Icon icon="ph:paint-bucket-bold" /> 채우기</button>
+        <button onClick={() => resizeText(1.2)} disabled={!hasSelection || cropOn} className={tool}><Icon icon="ph:text-aa-bold" /> 크게</button>
+        <button onClick={() => resizeText(0.85)} disabled={!hasSelection || cropOn} className={tool}><Icon icon="ph:text-t-bold" /> 작게</button>
+        <button onClick={removeSel} disabled={!hasSelection || cropOn} className={tool}><Icon icon="ph:trash-bold" /> 삭제</button>
         <div className="mx-1 h-8 w-px bg-neutral-200 dark:bg-neutral-700" />
-        <button onClick={undo} disabled={!canUndo} className={tool}><Icon icon="ph:arrow-counter-clockwise-bold" /> 되돌리기</button>
-        <button onClick={redo} disabled={!canRedo} className={tool}><Icon icon="ph:arrow-clockwise-bold" /> 다시</button>
+        <button
+          onClick={() => (cropOn ? setCropOn(false) : openCrop())}
+          disabled={!bgUrl || !ready}
+          className={
+            cropOn
+              ? `${btn} border-2 border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300`
+              : tool
+          }
+        >
+          <Icon icon="ph:crop-bold" /> 자르기
+        </button>
+        <div className="mx-1 h-8 w-px bg-neutral-200 dark:bg-neutral-700" />
+        <button onClick={undo} disabled={!canUndo || cropOn} className={tool}><Icon icon="ph:arrow-counter-clockwise-bold" /> 되돌리기</button>
+        <button onClick={redo} disabled={!canRedo || cropOn} className={tool}><Icon icon="ph:arrow-clockwise-bold" /> 다시</button>
       </div>
+
+      {/* 자르기 바 — 화면이 좁으면 그림이 아래로 밀리므로 스크롤해도 버튼이 따라오게 붙여 둔다 */}
+      {cropOn && (
+        <div className="sticky top-0 z-30 border-b-2 border-emerald-500 bg-emerald-50 px-4 py-3 shadow-sm dark:bg-emerald-950/95">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <p className="flex items-center gap-2 text-lg font-bold text-emerald-800 dark:text-emerald-200">
+              <Icon icon="ph:crop-duotone" className="text-[24px]" />
+              남길 부분을 정해 주세요
+            </p>
+            <p className="text-base text-emerald-800/80 dark:text-emerald-200/80">
+              네모 안을 끌면 옮겨지고, 모서리의 동그라미를 끌면 크기가 바뀌어요.
+            </p>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-base font-semibold text-neutral-600 dark:text-neutral-300">모양</span>
+            {CROP_RATIOS.map((o) => (
+              <button
+                key={o.label}
+                onClick={() => {
+                  setCropRatio(o.r);
+                  setCrop((b) => fitRatio(b, o.r));
+                }}
+                className={`h-11 rounded-xl border-2 px-4 text-base font-semibold transition ${
+                  cropRatio === o.r
+                    ? "border-emerald-600 bg-emerald-600 text-white"
+                    : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
+                }`}
+              >
+                {o.label}
+              </button>
+            ))}
+            <span
+              aria-live="polite"
+              className="ml-1 rounded-lg bg-white px-3 py-2 text-base font-semibold text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300"
+            >
+              자른 크기 {cropInPixels().w}×{cropInPixels().h}px
+            </span>
+            <div className="ml-auto flex flex-wrap gap-2">
+              <button
+                onClick={() => setCropAskOpen(true)}
+                disabled={cropBusy}
+                className={`${btn} bg-emerald-600 px-5 text-white hover:bg-emerald-500`}
+              >
+                <Icon icon={cropBusy ? "ph:spinner-gap-bold" : "ph:check-bold"} className={cropBusy ? "animate-spin" : ""} />
+                {cropBusy ? "자르는 중..." : "이 부분만 남기기"}
+              </button>
+              <button
+                onClick={() => setCropOn(false)}
+                disabled={cropBusy}
+                className={`${btn} border-2 border-neutral-300 bg-white px-5 dark:border-neutral-600 dark:bg-neutral-800`}
+              >
+                <Icon icon="ph:x-bold" /> 그만두기
+              </button>
+            </div>
+          </div>
+          {cropMsg && <p className="mt-2 text-base text-red-600 dark:text-red-400">{cropMsg}</p>}
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={cropAskOpen}
+        icon="ph:crop-duotone"
+        title="이 부분만 남기고 자를까요?"
+        desc={`${cropInPixels().w}×${cropInPixels().h}px만 남고 나머지는 잘려 나가요. 자른 뒤에는 되돌릴 수 없어요.`}
+        onClose={() => setCropAskOpen(false)}
+        actions={[
+          {
+            label: "자르기",
+            tone: "primary",
+            icon: "ph:check-bold",
+            onClick: () => {
+              setCropAskOpen(false);
+              applyCrop();
+            },
+          },
+          { label: "취소", tone: "soft", onClick: () => setCropAskOpen(false) },
+        ]}
+      />
 
       {/* 페이지 바 */}
       <div className="flex items-center gap-2 overflow-x-auto border-b border-neutral-200 bg-neutral-50 px-4 py-2 dark:border-neutral-800 dark:bg-neutral-900/60">
@@ -830,7 +1101,8 @@ export default function Editor() {
           <button
             key={p.id ?? `p${i}`}
             onClick={() => showPage(i)}
-            className={`relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border-2 ${
+            disabled={cropOn}
+            className={`relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border-2 disabled:opacity-40 ${
               i === active ? "border-emerald-500 ring-2 ring-emerald-500/30" : "border-neutral-200 dark:border-neutral-700"
             }`}
             title={`${i + 1}페이지`}
@@ -844,7 +1116,7 @@ export default function Editor() {
           </button>
         ))}
         {pages.length > 1 && (
-          <button onClick={() => setDelPageOpen(true)} className={`${tool} h-10 shrink-0`}>
+          <button onClick={() => setDelPageOpen(true)} disabled={cropOn} className={`${tool} h-10 shrink-0`}>
             <Icon icon="ph:trash-bold" /> 이 페이지 삭제
           </button>
         )}
@@ -855,6 +1127,7 @@ export default function Editor() {
         <div className="flex min-w-0 flex-1 flex-col overflow-auto">
           <div className="flex flex-1 items-center justify-center p-6">
             <div
+              ref={stageRef}
               className="relative rounded-lg bg-white shadow-xl"
               style={{
                 opacity: ready ? 1 : 0,
@@ -865,6 +1138,48 @@ export default function Editor() {
               }}
             >
               <canvas ref={canvasEl} className="absolute inset-0" />
+
+              {/* 자르기 오버레이 — 남길 부분만 밝게 */}
+              {cropOn && disp.w > 0 && (
+                <div className="absolute inset-0 z-10 touch-none select-none">
+                  {/* 잘려 나갈 부분을 어둡게 */}
+                  <div className="pointer-events-none absolute bg-black/55" style={{ left: 0, top: 0, width: disp.w, height: crop.y }} />
+                  <div className="pointer-events-none absolute bg-black/55" style={{ left: 0, top: crop.y + crop.h, width: disp.w, height: Math.max(0, disp.h - crop.y - crop.h) }} />
+                  <div className="pointer-events-none absolute bg-black/55" style={{ left: 0, top: crop.y, width: crop.x, height: crop.h }} />
+                  <div className="pointer-events-none absolute bg-black/55" style={{ left: crop.x + crop.w, top: crop.y, width: Math.max(0, disp.w - crop.x - crop.w), height: crop.h }} />
+
+                  {/* 남길 영역 */}
+                  {/* 밝은 그림 위에서도 테두리가 보이도록 안팎으로 검은 선을 덧댄다 */}
+                  <div
+                    role="group"
+                    aria-label="자를 영역. 안쪽을 끌면 옮겨지고 모서리를 끌면 크기가 바뀝니다."
+                    onPointerDown={(e) => startCropDrag(e, "move")}
+                    className="absolute cursor-move border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.45)] ring-1 ring-inset ring-black/45"
+                    style={{ left: crop.x, top: crop.y, width: crop.w, height: crop.h }}
+                  >
+                    {/* 삼분할 안내선 */}
+                    <div className="pointer-events-none absolute inset-0 opacity-60">
+                      <div className="absolute left-1/3 top-0 h-full w-px bg-white/70" />
+                      <div className="absolute left-2/3 top-0 h-full w-px bg-white/70" />
+                      <div className="absolute left-0 top-1/3 h-px w-full bg-white/70" />
+                      <div className="absolute left-0 top-2/3 h-px w-full bg-white/70" />
+                    </div>
+                    {/* 모서리 손잡이(크게) */}
+                    {([
+                      ["nw", "-top-3.5 -left-3.5 cursor-nwse-resize"],
+                      ["ne", "-top-3.5 -right-3.5 cursor-nesw-resize"],
+                      ["sw", "-bottom-3.5 -left-3.5 cursor-nesw-resize"],
+                      ["se", "-bottom-3.5 -right-3.5 cursor-nwse-resize"],
+                    ] as const).map(([g, pos]) => (
+                      <span
+                        key={g}
+                        onPointerDown={(e) => startCropDrag(e, g)}
+                        className={`absolute h-7 w-7 rounded-full border-[3px] border-emerald-500 bg-white shadow-md ${pos}`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
           {!bgUrl && ready && (

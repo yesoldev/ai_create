@@ -258,6 +258,70 @@ async def save_pages(tid: str, body: PagesSaveBody, user: dict = Depends(get_cur
     return {"ok": True}
 
 
+@router.put("/{tid}/pages/{page_id}/image")
+async def replace_page_image(
+    tid: str,
+    page_id: str,
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user),
+):
+    """페이지 배경 이미지 교체(자르기 등 편집 결과 저장). AI 생성 없음(무과금).
+
+    새 경로에 저장한다(이전 파일은 생성 이력이 참조할 수 있어 지우지 않는다).
+    이 페이지가 프로젝트 대표 이미지였다면 대표 이미지/크기도 함께 갱신.
+    """
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(400, "이미지 파일만 올릴 수 있어요.")
+    data = await file.read()
+    if len(data) > 20 * 1024 * 1024:
+        raise HTTPException(400, "이미지가 너무 큽니다(최대 20MB).")
+    try:
+        img = Image.open(io.BytesIO(data))
+        w, h = img.size
+        buf = io.BytesIO()
+        img.convert("RGBA").save(buf, format="PNG")
+        png = buf.getvalue()
+    except Exception:  # noqa: BLE001
+        raise HTTPException(400, "이미지를 읽을 수 없어요.")
+
+    with get_conn() as conn:
+        page = conn.execute(
+            "select p.id, p.bg_image_path from public.template_pages p "
+            "join public.templates t on t.id = p.template_id "
+            "where p.id=%s and p.template_id=%s and t.created_by=%s",
+            (page_id, tid, user["id"]),
+        ).fetchone()
+    if not page:
+        raise HTTPException(404, "페이지를 찾을 수 없습니다.")
+
+    gid = str(uuid.uuid4())
+    result_path = f"{user['id']}/{gid}.png"
+    thumb_path = f"{user['id']}/{gid}.jpg"
+    await storage.upload("results", result_path, png, "image/png")
+    await storage.upload("thumbs", thumb_path, storage.make_thumbnail(png), "image/jpeg")
+
+    with get_conn() as conn:
+        conn.execute(
+            "update public.template_pages set bg_image_path=%s, thumb_path=%s "
+            "where id=%s and template_id=%s",
+            (result_path, thumb_path, page_id, tid),
+        )
+        # 대표 이미지가 이 페이지였으면 프로젝트 쪽도 같이 갱신(보관함 썸네일·크기)
+        conn.execute(
+            "update public.templates set bg_image_path=%s, thumb_path=%s, size_w=%s, size_h=%s "
+            "where id=%s and created_by=%s and bg_image_path is not distinct from %s",
+            (result_path, thumb_path, w, h, tid, user["id"], page["bg_image_path"]),
+        )
+
+    return {
+        "page_id": page_id,
+        "size_w": w,
+        "size_h": h,
+        "image_url": await storage.signed_url("results", result_path),
+        "thumb_url": storage.public_url("thumbs", thumb_path),
+    }
+
+
 @router.delete("/{tid}/pages/{page_id}")
 async def delete_page(tid: str, page_id: str, user: dict = Depends(get_current_user)):
     with get_conn() as conn:
