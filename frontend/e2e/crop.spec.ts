@@ -32,15 +32,16 @@ async function openEditor(page: Page) {
   await expect(page.getByRole("button", { name: "자르기" })).toBeEnabled();
 }
 
-test("자를 영역을 정해 자르면 새 이미지로 저장된다", async ({ page }) => {
+test("자를 영역을 정해 자르면 새 페이지로 추가된다", async ({ page }) => {
   await login(page);
   await openEditor(page);
+  await expect(page.getByText("페이지 1/1")).toBeVisible();
 
   let uploadedTo = "";
-  await page.route("**/api/templates/*/pages/*/image", (r) => {
+  await page.route("**/api/templates/*/pages/image", (r) => {
     uploadedTo = r.request().url();
     return r.fulfill(
-      OK({ page_id: "pg1", size_w: 200, size_h: 200, image_url: CROPPED, thumb_url: CROPPED }),
+      OK({ page_id: "pg2", sort_order: 1, size_w: 200, size_h: 200, image_url: CROPPED, thumb_url: CROPPED }),
     );
   });
 
@@ -53,21 +54,23 @@ test("자를 영역을 정해 자르면 새 이미지로 저장된다", async ({
   await page.getByRole("button", { name: "정사각형" }).click();
   await expect(page.getByText("자른 크기 200×200px")).toBeVisible();
 
-  // 자르기 → 되돌릴 수 없다는 확인 후 진행
+  // 자르기 → 새 페이지로 추가된다는 확인 후 진행
   await page.getByRole("button", { name: "이 부분만 남기기" }).click();
   await expect(page.getByRole("heading", { name: "이 부분만 남기고 자를까요?" })).toBeVisible();
-  const put = page.waitForRequest(
-    (r) => r.method() === "PUT" && /\/api\/templates\/t1\/pages\/pg1\/image$/.test(r.url()),
+  await expect(page.getByText(/새 페이지로 추가돼요. 지금 페이지는 그대로 남아요/)).toBeVisible();
+  const post = page.waitForRequest(
+    (r) => r.method() === "POST" && /\/api\/templates\/t1\/pages\/image$/.test(r.url()),
   );
   await page.getByRole("button", { name: "자르기", exact: true }).last().click();
-  await put;
+  await post;
 
-  await expect(page.getByText(/사진을 잘랐어요\. \(200×200px\)/)).toBeVisible({ timeout: 10_000 });
-  expect(uploadedTo).toMatch(/\/api\/templates\/t1\/pages\/pg1\/image$/);
-  // 자르기 바는 닫히고, 잘린 크기로 다시 편집할 수 있다
+  await expect(page.getByText(/잘라서 새 페이지로 만들었어요\. \(200×200px/)).toBeVisible({ timeout: 10_000 });
+  expect(uploadedTo).toMatch(/\/api\/templates\/t1\/pages\/image$/);
+  // 원본 페이지는 남고 잘린 그림이 2페이지로 추가되어 그 페이지가 열린다
+  await expect(page.getByText("페이지 2/2")).toBeVisible();
   await expect(page.getByText("남길 부분을 정해 주세요")).toBeHidden();
   await page.getByRole("button", { name: "자르기" }).click();
-  await expect(page.getByText("자른 크기 160×160px")).toBeVisible(); // 200×200의 80%
+  await expect(page.getByText("자른 크기 160×160px")).toBeVisible(); // 새 페이지 200×200의 80%
 });
 
 test("모서리를 끌면 자를 크기가 바뀌고, 그만두면 원본 그대로다", async ({ page }) => {
@@ -100,7 +103,7 @@ test("모서리를 끌면 자를 크기가 바뀌고, 그만두면 원본 그대
 test("자르기 저장에 실패하면 한글 안내가 뜬다", async ({ page }) => {
   await login(page);
   await openEditor(page);
-  await page.route("**/api/templates/*/pages/*/image", (r) =>
+  await page.route("**/api/templates/*/pages/image", (r) =>
     r.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ detail: {} }) }),
   );
 

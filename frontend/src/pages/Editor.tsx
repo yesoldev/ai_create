@@ -8,7 +8,7 @@ import {
   updateTemplate,
   savePages,
   deletePage,
-  replacePageImage,
+  addPageImage,
   type TemplatePage,
 } from "../lib/library";
 import { listFolders, withDepth, type Folder } from "../lib/folders";
@@ -605,6 +605,7 @@ export default function Editor() {
     };
   }
 
+  // 자른 결과는 '새 페이지'로 추가한다(원래 페이지는 그대로 남아 되돌리기가 된다)
   async function applyCrop() {
     const c = fabricRef.current;
     const img = bgImgRef.current;
@@ -619,31 +620,42 @@ export default function Editor() {
       off.getContext("2d")!.drawImage(img, px.x, px.y, px.w, px.h, 0, 0, px.w, px.h);
       const blob = await new Promise<Blob>((r) => off.toBlob((b) => r(b!), "image/png"));
 
-      // 글자·도형도 잘려 나간 만큼 같이 이동(같은 자리에 남게)
-      c.getObjects().forEach((o) => {
-        o.set({ left: (o.left || 0) - px.x, top: (o.top || 0) - px.y });
-        o.setCoords();
+      // 새 페이지의 글자·도형은 잘려 나간 만큼 옮겨 같은 자리에 오게 한다.
+      // (지금 페이지는 건드리지 않으려고 캔버스가 아니라 JSON 사본을 옮긴다)
+      const moved = JSON.parse(JSON.stringify(c.toJSON())) as {
+        objects?: { left?: number; top?: number }[];
+      };
+      moved.objects?.forEach((o) => {
+        o.left = (o.left || 0) - px.x;
+        o.top = (o.top || 0) - px.y;
       });
 
-      const page = pagesRef.current[activeRef.current];
-      const canSave = !!st.templateId && !!page.id;
+      const canSave = !!st.templateId;
       let url: string;
+      let newPageId: string | null = null;
       if (canSave) {
-        url = (await replacePageImage(st.templateId!, page.id!, blob)).image_url;
+        const r = await addPageImage(st.templateId!, blob);
+        url = r.image_url;
+        newPageId = r.page_id;
       } else {
-        url = URL.createObjectURL(blob); // 아직 저장 안 된 홍보물 — 이 화면에서만 적용
+        url = URL.createObjectURL(blob); // 아직 저장 안 된 홍보물 — 이 화면에서만
       }
-      page.bgUrl = url;
-      page.canvasJson = c.toJSON() as Record<string, unknown>;
-      setPages([...pagesRef.current]);
+
+      syncActive(); // 지금 페이지 오버레이 보존
+      const next = [
+        ...pagesRef.current,
+        { id: newPageId, bgUrl: url, canvasJson: moved as Record<string, unknown> },
+      ];
+      pagesRef.current = next;
+      setPages([...next]);
       setCropOn(false);
       setDirty(true);
-      await showPage(activeRef.current, false); // 잘린 크기로 다시 표시
+      await showPage(next.length - 1); // 잘린 새 페이지로 이동
       if (canSave) {
         await autoSavePages();
-        setSaveMsg(`사진을 잘랐어요. (${px.w}×${px.h}px)`);
+        setSaveMsg(`잘라서 새 페이지로 만들었어요. (${px.w}×${px.h}px · 원래 페이지는 그대로 있어요)`);
       } else {
-        setSaveMsg("사진을 잘랐어요. 아직 보관함에 저장되지 않은 홍보물이라 이 화면에서만 적용돼요.");
+        setSaveMsg("잘라서 새 페이지로 만들었어요. 아직 보관함에 저장되지 않은 홍보물이라 이 화면에서만 남아요.");
       }
     } catch (e: unknown) {
       setCropMsg(errorInfo(e, "자르기에 실패했어요. 다시 시도해 주세요.").message);
@@ -1076,7 +1088,7 @@ export default function Editor() {
         open={cropAskOpen}
         icon="ph:crop-duotone"
         title="이 부분만 남기고 자를까요?"
-        desc={`${cropInPixels().w}×${cropInPixels().h}px만 남고 나머지는 잘려 나가요. 자른 뒤에는 되돌릴 수 없어요.`}
+        desc={`${cropInPixels().w}×${cropInPixels().h}px만 남은 그림이 새 페이지로 추가돼요. 지금 페이지는 그대로 남아요.`}
         onClose={() => setCropAskOpen(false)}
         actions={[
           {

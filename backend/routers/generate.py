@@ -23,6 +23,26 @@ logger = logging.getLogger("generate")
 
 _MM_PER_INCH = 25.4
 
+# 글자 규칙 — 모델이 문구를 제멋대로 바꾸거나 지어내는 것을 막는다.
+# (자유도 변주·그림체 변경이 걸려도 글자는 절대 변주 대상이 아니다)
+_TEXT_RULES = (
+    "\n\n[글자 규칙 — 반드시 지킬 것]\n"
+    "1) 그림에 넣을 글자는 아래 '넣을 문구'가 전부다. 여기 없는 글자·문장·숫자·영어·상호·"
+    "전화번호·주소·로고·워터마크를 절대 새로 지어내 넣지 마.\n"
+    "2) 맞춤법·띄어쓰기·줄바꿈을 한 글자도 바꾸지 말고 그대로 옮겨 적어.\n"
+    "3) 문구는 빠짐없이 전부, 잘리거나 뭉개지지 않게 또렷하게 넣어.\n"
+    "4) 구도·색·그림체가 어떻게 바뀌든 글자 내용은 절대 바꾸지 마.\n\n"
+    '넣을 문구:\n"{text}"'
+)
+_NO_TEXT_RULE = (
+    "\n\n[글자 규칙] 그림 안에 글자를 넣지 마. 상호·문장·숫자·영어 등 어떤 글자도 지어내지 말고 "
+    "그림만 그려줘."
+)
+_KEEP_TEXT_RULE = (
+    "\n\n[글자 규칙] 참고 이미지에 있는 글자는 내용·맞춤법을 그대로 유지하고, "
+    "요청하지 않은 새 글자·문장·숫자·영어를 지어내 넣지 마."
+)
+
 
 def _ai_http_error(e: openai_client.AiError) -> HTTPException:
     """AI 오류 → 한글 메시지가 담긴 HTTP 오류.
@@ -40,6 +60,20 @@ _SIMILARITY_PREFIX = {
     3: "아래 참고 이미지의 구도와 색감을 비슷하게 유지하며 다시 만들어줘.",
     4: "아래 참고 이미지를 거의 그대로 유지하되 아주 조금만 다르게 만들어줘.",
 }
+
+
+def apply_text_rules(prompt: str, mode: str, text_content: str | None, has_ref: bool) -> str:
+    """프롬프트 끝에 글자 규칙을 붙인다(가장 뒤 = 가장 강하게 걸린다).
+
+    - 넣을 문구가 있으면: 그 문구만 정확히, 다른 글자는 지어내지 말 것
+    - 문구가 없고 참고 이미지가 있으면(편집기 AI 수정 등): 원래 글자를 지킬 것
+    - 문구도 참고 이미지도 없으면: 글자를 아예 넣지 말 것
+    """
+    if mode != "ai_text":
+        return prompt
+    if text_content:
+        return prompt + _TEXT_RULES.format(text=text_content)
+    return prompt + (_KEEP_TEXT_RULE if has_ref else _NO_TEXT_RULE)
 
 
 def to_px(value: float, unit: str, dpi: int) -> int:
@@ -92,14 +126,7 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
             detail=f"이번 달 한도가 부족합니다. 예상 {est:,.0f}원 / 잔여 {remaining:,.0f}원",
         )
 
-    # 2) AI 합성 모드면 문구를 프롬프트에 주입.
-    #    배치 방식(글자 최소화 vs 전단지 배치)은 프론트가 kind에 맞춰 prompt에 이미
-    #    지시하므로, 여기서는 넣을 문구만 정확히 전달한다.
     prompt = body.prompt
-    if body.mode == "ai_text" and body.text_content:
-        prompt = (
-            f'{prompt}\n\n그림에 넣을 한글 문구(정확히, 오탈자 없이):\n"{body.text_content}"'
-        )
 
     # 참고 이미지 준비 (이전 생성물 또는 첨부 업로드)
     ref_path = None
@@ -124,6 +151,10 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
         except Exception:  # noqa: BLE001
             ref_bytes = None
         prompt = f"{_SIMILARITY_PREFIX.get(body.similarity or 2)} {prompt}"
+
+    # 2) 글자 규칙 — 프롬프트 맨 끝에 붙여 가장 강하게 걸리게 한다.
+    #    (배치 방식은 프론트가 kind에 맞춰 이미 지시하고, 여기서는 '무슨 글자를 넣을지'만 못박는다)
+    prompt = apply_text_rules(prompt, body.mode, body.text_content, bool(ref_path))
 
     # 3) 생성 (참고 있으면 변형 생성, 없으면 신규. 최소 픽셀 처리 후 요청 크기로 축소)
     try:

@@ -12,9 +12,15 @@ const REASSURE = [
   { icon: "ph:printer-duotone", text: "완성하면 바로 인쇄할 수 있어요" },
 ];
 
+// 아이디(이메일) 저장 — 비밀번호는 저장하지 않는다
+const SAVED_EMAIL_KEY = "ac_saved_email";
+const SAVE_EMAIL_FLAG = "ac_save_email";
+
 export default function Login() {
   const { login } = useAuth();
-  const [email, setEmail] = useState("");
+  // 저장해 둔 아이디가 있으면 채워 둔다(기본값: 저장함)
+  const [email, setEmail] = useState(() => localStorage.getItem(SAVED_EMAIL_KEY) || "");
+  const [saveEmail, setSaveEmail] = useState(() => localStorage.getItem(SAVE_EMAIL_FLAG) !== "0");
   const [pw, setPw] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [err, setErr] = useState("");
@@ -26,6 +32,10 @@ export default function Login() {
     setBusy(true);
     try {
       await login(email, pw);
+      // 로그인에 성공한 아이디만 저장한다(오타가 남지 않게)
+      localStorage.setItem(SAVE_EMAIL_FLAG, saveEmail ? "1" : "0");
+      if (saveEmail) localStorage.setItem(SAVED_EMAIL_KEY, email.trim());
+      else localStorage.removeItem(SAVED_EMAIL_KEY);
       // 성공 시 화면 이동은 /login 라우트가 user 상태를 보고 자동 처리(App.tsx).
       // busy 유지 → 리다이렉트 전까지 버튼은 확인중 상태.
     } catch {
@@ -191,6 +201,18 @@ export default function Login() {
                 </button>
               </div>
             </div>
+
+            {/* 아이디 저장 — 기본으로 켜 둔다(비밀번호는 저장하지 않음) */}
+            <label className="flex cursor-pointer items-center gap-3 text-lg text-neutral-700 dark:text-neutral-300">
+              <input
+                type="checkbox"
+                checked={saveEmail}
+                onChange={(e) => setSaveEmail(e.target.checked)}
+                className="h-6 w-6 shrink-0 cursor-pointer rounded-md accent-emerald-600"
+              />
+              아이디 저장
+              <span className="text-base text-neutral-400">(비밀번호는 저장하지 않아요)</span>
+            </label>
 
             {/* 오류 메시지 */}
             {err && (

@@ -11,6 +11,7 @@ export default function Library() {
   const [sel, setSel] = useState<string | null>(null);
   const [items, setItems] = useState<TemplateListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState(""); // 제목 검색어
   const [opening, setOpening] = useState<string | null>(null);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [confirm, setConfirm] = useState<{ title: string; desc?: string; onYes: () => void } | null>(null);
@@ -124,6 +125,10 @@ export default function Library() {
   }
 
   const tree = withDepth(folders);
+  // 제목 검색(대소문자 무시). 목록이 100개 이하라 화면에서 바로 거른다.
+  const shown = q.trim()
+    ? items.filter((t) => (t.name || "").toLowerCase().includes(q.trim().toLowerCase()))
+    : items;
 
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
@@ -178,15 +183,56 @@ export default function Library() {
           <h1 className="text-2xl font-bold">저장한 홍보물</h1>
           <p className="mt-1 text-base text-neutral-500 dark:text-neutral-400">눌러서 다시 열고, 글자만 바꿔 재사용하세요.</p>
 
+          {/* 제목으로 찾기 */}
+          <div className="relative mt-4">
+            <Icon icon="ph:magnifying-glass-bold" className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[22px] text-neutral-400" />
+            <input
+              /* type=search 는 브라우저가 자체 X 버튼을 그려 우리 X와 겹친다 → text */
+              type="text"
+              inputMode="search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              aria-label="제목으로 찾기"
+              placeholder="제목으로 찾기 (예: 행복식당)"
+              className="h-14 w-full rounded-2xl border-2 border-neutral-200 bg-white pl-12 pr-12 text-lg outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15 dark:border-neutral-800 dark:bg-neutral-900"
+            />
+            {q && (
+              <button
+                onClick={() => setQ("")}
+                aria-label="검색어 지우기"
+                className="absolute right-3 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-lg text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+              >
+                <Icon icon="ph:x-bold" />
+              </button>
+            )}
+          </div>
+          {q.trim() && !loading && (
+            <p aria-live="polite" className="mt-2 text-base text-neutral-500 dark:text-neutral-400">
+              <b className="text-emerald-700 dark:text-emerald-300">{shown.length}개</b> 찾았어요 (전체 {items.length}개 중)
+            </p>
+          )}
+
           {loading ? (
             <p className="mt-10 text-center text-neutral-400">불러오는 중...</p>
           ) : items.length === 0 ? (
             <div className="mt-6 rounded-3xl border-2 border-dashed border-neutral-300 p-12 text-center text-lg text-neutral-400 dark:border-neutral-700">
               이 폴더에는 저장한 홍보물이 없어요.
             </div>
+          ) : shown.length === 0 ? (
+            <div className="mt-6 rounded-3xl border-2 border-dashed border-neutral-300 p-12 text-center dark:border-neutral-700">
+              <p className="text-lg text-neutral-500 dark:text-neutral-400">
+                제목에 <b>“{q.trim()}”</b>이(가) 들어간 홍보물이 없어요.
+              </p>
+              <button
+                onClick={() => setQ("")}
+                className="mx-auto mt-4 flex h-12 items-center gap-1.5 rounded-xl border-2 border-neutral-200 px-4 text-base font-semibold hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              >
+                <Icon icon="ph:arrow-counter-clockwise-bold" /> 검색어 지우고 전체 보기
+              </button>
+            </div>
           ) : (
             <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-              {items.map((t) => (
+              {shown.map((t) => (
                 <div key={t.id} className="overflow-hidden rounded-2xl border-2 border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
                   <button onClick={() => open(t.id)} disabled={opening === t.id} className="block w-full text-left">
                     <div className="relative aspect-square bg-neutral-100 dark:bg-neutral-800">

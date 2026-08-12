@@ -258,17 +258,15 @@ async def save_pages(tid: str, body: PagesSaveBody, user: dict = Depends(get_cur
     return {"ok": True}
 
 
-@router.put("/{tid}/pages/{page_id}/image")
-async def replace_page_image(
+@router.post("/{tid}/pages/image")
+async def add_page_image(
     tid: str,
-    page_id: str,
     file: UploadFile = File(...),
     user: dict = Depends(get_current_user),
 ):
-    """페이지 배경 이미지 교체(자르기 등 편집 결과 저장). AI 생성 없음(무과금).
+    """이미지를 올려 이 프로젝트의 '새 페이지'로 추가(편집기 자르기 결과). AI 생성 없음(무과금).
 
-    새 경로에 저장한다(이전 파일은 생성 이력이 참조할 수 있어 지우지 않는다).
-    이 페이지가 프로젝트 대표 이미지였다면 대표 이미지/크기도 함께 갱신.
+    원본 페이지는 그대로 두므로 자르기를 되돌리고 싶으면 이전 페이지를 쓰면 된다.
     """
     if not (file.content_type or "").startswith("image/"):
         raise HTTPException(400, "이미지 파일만 올릴 수 있어요.")
@@ -285,14 +283,11 @@ async def replace_page_image(
         raise HTTPException(400, "이미지를 읽을 수 없어요.")
 
     with get_conn() as conn:
-        page = conn.execute(
-            "select p.id, p.bg_image_path from public.template_pages p "
-            "join public.templates t on t.id = p.template_id "
-            "where p.id=%s and p.template_id=%s and t.created_by=%s",
-            (page_id, tid, user["id"]),
+        owner = conn.execute(
+            "select id from public.templates where id=%s and created_by=%s", (tid, user["id"])
         ).fetchone()
-    if not page:
-        raise HTTPException(404, "페이지를 찾을 수 없습니다.")
+    if not owner:
+        raise HTTPException(404, "프로젝트를 찾을 수 없습니다.")
 
     gid = str(uuid.uuid4())
     result_path = f"{user['id']}/{gid}.png"
@@ -301,20 +296,28 @@ async def replace_page_image(
     await storage.upload("thumbs", thumb_path, storage.make_thumbnail(png), "image/jpeg")
 
     with get_conn() as conn:
+        # 구 데이터(페이지 행 없음) 안전 백필: 기존 대표 이미지를 0페이지로
         conn.execute(
-            "update public.template_pages set bg_image_path=%s, thumb_path=%s "
-            "where id=%s and template_id=%s",
-            (result_path, thumb_path, page_id, tid),
+            "insert into public.template_pages (template_id, sort_order, bg_image_path, thumb_path, canvas_json) "
+            "select id, 0, bg_image_path, thumb_path, canvas_json from public.templates "
+            "where id=%s and not exists (select 1 from public.template_pages p where p.template_id=%s)",
+            (tid, tid),
         )
-        # 대표 이미지가 이 페이지였으면 프로젝트 쪽도 같이 갱신(보관함 썸네일·크기)
-        conn.execute(
-            "update public.templates set bg_image_path=%s, thumb_path=%s, size_w=%s, size_h=%s "
-            "where id=%s and created_by=%s and bg_image_path is not distinct from %s",
-            (result_path, thumb_path, w, h, tid, user["id"], page["bg_image_path"]),
-        )
+        nxt = conn.execute(
+            "select coalesce(max(sort_order), -1) + 1 as n from public.template_pages where template_id=%s",
+            (tid,),
+        ).fetchone()["n"]
+        page = conn.execute(
+            "insert into public.template_pages (template_id, sort_order, bg_image_path, thumb_path, canvas_json) "
+            "values (%s,%s,%s,%s,%s) returning id",
+            (tid, nxt, result_path, thumb_path, None),
+        ).fetchone()
+        # 보관함 목록에는 최신 페이지를 대표로 보여준다(생성 시와 동일 규칙)
+        conn.execute("update public.templates set thumb_path=%s where id=%s", (thumb_path, tid))
 
     return {
-        "page_id": page_id,
+        "page_id": page["id"],
+        "sort_order": nxt,
         "size_w": w,
         "size_h": h,
         "image_url": await storage.signed_url("results", result_path),

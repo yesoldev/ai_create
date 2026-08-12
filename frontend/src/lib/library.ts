@@ -88,21 +88,18 @@ export async function savePages(
 
 export interface PageImageResult {
   page_id: string;
+  sort_order: number;
   size_w: number;
   size_h: number;
   image_url: string;
   thumb_url: string;
 }
 
-// 페이지 배경 이미지 교체(자르기 결과 저장) — AI 생성 없음(무과금)
-export async function replacePageImage(
-  templateId: string,
-  pageId: string,
-  blob: Blob,
-): Promise<PageImageResult> {
+// 이미지를 새 페이지로 추가(편집기 자르기 결과) — AI 생성 없음(무과금)
+export async function addPageImage(templateId: string, blob: Blob): Promise<PageImageResult> {
   const fd = new FormData();
   fd.append("file", new File([blob], "page.png", { type: "image/png" }));
-  return (await api.put<PageImageResult>(`/api/templates/${templateId}/pages/${pageId}/image`, fd)).data;
+  return (await api.post<PageImageResult>(`/api/templates/${templateId}/pages/image`, fd)).data;
 }
 
 export async function deletePage(templateId: string, pageId: string): Promise<void> {

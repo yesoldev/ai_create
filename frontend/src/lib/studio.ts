@@ -180,7 +180,7 @@ export const FREEDOMS: FreedomChoice[] = [
     label: "적당히 다르게",
     desc: "추천 · 구도와 조명이 매번 바뀜",
     changes: "그림을 어디에 놓을지 6가지, 빛을 어떻게 비출지 5가지 중에서 만들 때마다 하나씩 골라 씁니다. (예: 이번엔 왼쪽에 크게·노을빛, 다음엔 비스듬한 배치·환한 빛)",
-    keeps: "그림을 그리는 방식(사진 같은지, 그림 같은지)은 그대로예요.",
+    keeps: "그림을 그리는 방식(사진 같은지, 그림 같은지)과 적어 주신 글자는 그대로예요.",
     when: "여러 장 만들어 보고 마음에 드는 것을 고르고 싶을 때 좋아요.",
   },
   {
@@ -200,9 +200,13 @@ export const FREEDOMS: FreedomChoice[] = [
  */
 export function variationHint(freedom: Freedom): string {
   if (freedom === "safe") return "";
+  // 변주는 '그림'에만 건다. 글자까지 자유롭게 바꾸면 문구가 제멋대로 나온다.
+  const textLock =
+    " 단, 변주는 그림(구도·빛·그림체)에만 적용해라. 글자는 변주 대상이 아니다 —" +
+    " 지정한 문구만 그대로 쓰고 새로운 문장·단어·숫자·영어를 지어내지 마.";
   const base = ` 이번 그림은 ${pick(COMPOSITIONS)}로, ${pick(LIGHTINGS)} 아래 그려줘.`;
-  if (freedom === "normal") return base;
-  return `${base} 그림체는 ${pick(STYLES)}으로 하고, 흔한 구성 대신 과감하고 새로운 시안으로 만들어줘.`;
+  if (freedom === "normal") return `${base}${textLock}`;
+  return `${base} 그림체는 ${pick(STYLES)}으로 하고, 흔한 구성 대신 과감하고 새로운 시안으로 만들어줘.${textLock}`;
 }
 
 // 자유도는 세션 동안 유지 — 다시 만들 때마다 고르지 않아도 되게.

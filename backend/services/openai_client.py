@@ -207,8 +207,16 @@ async def generate_from_reference(
     참고 이미지는 최소 픽셀 제약을 맞추기 위해 생성 크기로 리샘플해 전달한다.
     """
     gen_w, gen_h, fin_w, fin_h = plan_size(width, height)
-    # 참고 이미지를 생성 크기에 맞춰 리샘플(최소 픽셀 예산 충족)
-    ref_img = Image.open(io.BytesIO(ref_png)).convert("RGBA").resize((gen_w, gen_h), Image.LANCZOS)
+    # 참고 이미지는 원본 비율·해상도 그대로 보낸다.
+    #  - 출력 크기는 size 인자가 결정하므로 입력을 늘릴 필요가 없다(2026-08-12 실측 확인).
+    #  - 예전처럼 출력 크기에 맞춰 늘리면 (1) 확대로 화질이 뭉개져 'AI로 수정'을 반복할수록
+    #    나빠지고 (2) 비율이 찌그러져 참고 이미지의 구도가 그대로 새 크기에 눌려 나온다.
+    #  - 상한(SIZE_MAX)만 넘지 않게 줄인다(입력 토큰 = 비용).
+    ref_img = Image.open(io.BytesIO(ref_png)).convert("RGBA")
+    longest = max(ref_img.size)
+    if longest > SIZE_MAX:
+        s = SIZE_MAX / longest
+        ref_img = ref_img.resize((max(1, round(ref_img.width * s)), max(1, round(ref_img.height * s))), Image.LANCZOS)
     buf = io.BytesIO()
     ref_img.save(buf, format="PNG")
     buf.name = "reference.png"
@@ -221,6 +229,7 @@ async def generate_from_reference(
             image=buf,
             prompt=with_guard(prompt, safety_level),
             size=f"{gen_w}x{gen_h}",
+            quality=quality,  # 구 SDK에선 edit에 못 넘겼다(openai 3.x부터 가능)
             n=1,
         ),
     )
@@ -252,6 +261,7 @@ async def inpaint_image(
             image=img_f,
             mask=mask_f,
             prompt=with_guard(prompt, safety_level),
+            quality=quality,
             n=1,
         ),
     )
