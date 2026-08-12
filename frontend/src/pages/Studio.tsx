@@ -248,14 +248,19 @@ export default function Studio() {
       });
       setResult(r);
     } catch (e: unknown) {
-      const err = e as { response?: { status?: number; data?: { detail?: string } } };
-      const detail = err?.response?.data?.detail;
+      const err = e as { response?: { status?: number; data?: { detail?: unknown } } };
+      const raw = err?.response?.data?.detail;
+      // 422는 FastAPI 검증 오류(detail이 배열)일 수도 있어 문자열일 때만 사용한다.
+      const detail = typeof raw === "string" ? raw : undefined;
+      const status = err?.response?.status;
       setError(
-        err?.response?.status === 402
+        status === 402
           ? "이번 달 사용할 수 있는 금액을 넘었어요. 관리자에게 문의하세요."
-          : detail
-            ? `이미지를 만들지 못했어요: ${detail}`
-            : "이미지를 만들지 못했어요. 잠시 후 다시 시도해 주세요.",
+          : status === 422 && detail
+            ? detail // 안전 규정 차단 등, 서버가 그대로 보여줄 안내를 준 경우
+            : detail
+              ? `이미지를 만들지 못했어요: ${detail}`
+              : "이미지를 만들지 못했어요. 잠시 후 다시 시도해 주세요.",
       );
     } finally {
       setBusy(false);

@@ -23,6 +23,12 @@ logger = logging.getLogger("generate")
 
 _MM_PER_INCH = 25.4
 
+# OpenAI 안전 필터에 막혔을 때 사용자에게 보여줄 안내(원문 영어 오류 대신).
+_MODERATION_MSG = (
+    "만들어진 그림이 OpenAI 안전 규정에 걸려 사용할 수 없었어요. "
+    "사람의 모습이나 신체를 묘사하는 표현을 빼고, 제품·매장·글자 위주로 설명을 바꿔 다시 시도해 주세요."
+)
+
 # 유사도(1~4)에 따른 프롬프트 접두 — 모델에 강도 파라미터가 없어 문구로 근사(계획 §3.1)
 _SIMILARITY_PREFIX = {
     1: "아래 참고 이미지의 느낌만 살짝 참고해 새롭게 만들어줘.",
@@ -119,6 +125,9 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
             png, usage, (w, h) = await openai_client.generate_from_reference(ref_bytes, prompt, w, h, body.quality)
         else:
             png, usage, (w, h) = await openai_client.generate_image(prompt, w, h, body.quality)
+    except openai_client.ModerationBlocked:
+        logger.warning("안전필터 차단(재시도 실패) user=%s", user.get("id"))
+        raise HTTPException(422, _MODERATION_MSG)
     except Exception as e:  # noqa: BLE001
         # 실제 원인(OpenAI 에러/타임아웃 등)을 서버 로그에 남긴다(진단용).
         logger.exception(
@@ -236,6 +245,9 @@ async def inpaint(body: InpaintBody, user: dict = Depends(get_current_user)):
 
     try:
         png, usage = await openai_client.inpaint_image(src, mask, body.prompt, body.quality)
+    except openai_client.ModerationBlocked:
+        logger.warning("안전필터 차단(부분 재생성) user=%s", user.get("id"))
+        raise HTTPException(422, _MODERATION_MSG)
     except Exception as e:  # noqa: BLE001
         logger.exception("부분 재생성 실패 user=%s", user.get("id"))
         raise HTTPException(502, f"부분 재생성 실패: {e}")

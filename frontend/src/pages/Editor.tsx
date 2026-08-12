@@ -525,14 +525,19 @@ export default function Editor() {
           (r.remaining_krw === null ? " (잔액 무제한)." : ` · 이번 달 남은 금액 ${krw(r.remaining_krw)}.`),
       );
     } catch (e: unknown) {
-      const err = e as { response?: { status?: number; data?: { detail?: string } } };
-      const detail = err?.response?.data?.detail;
+      const err = e as { response?: { status?: number; data?: { detail?: unknown } } };
+      const raw = err?.response?.data?.detail;
+      // 422는 FastAPI 검증 오류(detail이 배열)일 수도 있어 문자열일 때만 사용한다.
+      const detail = typeof raw === "string" ? raw : undefined;
+      const status = err?.response?.status;
       setAiMsg(
-        err?.response?.status === 402
+        status === 402
           ? "이번 달 사용할 수 있는 금액을 넘었어요. 관리자에게 문의하세요."
-          : detail
-            ? `AI 수정 실패: ${detail}`
-            : "AI 수정에 실패했어요. 잠시 후 다시 시도해 주세요.",
+          : status === 422 && detail
+            ? detail // 안전 규정 차단 등, 서버가 그대로 보여줄 안내를 준 경우
+            : detail
+              ? `AI 수정 실패: ${detail}`
+              : "AI 수정에 실패했어요. 잠시 후 다시 시도해 주세요.",
       );
     } finally {
       setAiBusy(false);
