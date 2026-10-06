@@ -82,6 +82,14 @@ def _translate(e: Exception) -> AiError:
     if _is_moderation_block(e):
         return ModerationBlocked()
     if isinstance(e, RateLimitError):
+        # 크레딧 소진도 429로 온다 — 기다려도 안 풀리므로 관리자 안내로 분리
+        if getattr(e, "code", None) in ("insufficient_quota", "credit_balance_exhausted") or (
+            "insufficient_quota" in str(e) or "credit_balance_exhausted" in str(e)
+        ):
+            return AiError(
+                "AI 이용 요금(크레딧)이 모두 소진되어 그림을 만들 수 없어요. 관리자에게 충전을 요청해 주세요.",
+                code="quota",
+            )
         return AiError(
             "지금 AI 서버에 요청이 많이 몰려 있어요. 1~2분 뒤에 다시 시도해 주세요.",
             code="rate_limit",
