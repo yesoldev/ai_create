@@ -29,6 +29,20 @@ export interface TemplateDetail {
   pages?: TemplatePage[];
 }
 
+/** 프로젝트를 편집기로 열 때 넘기는 상태 — 홈·보관함·작업 패널이 똑같이 연다 */
+export function editorStateOf(t: TemplateDetail) {
+  return {
+    imageUrl: t.bg_url || undefined,
+    w: t.size_w || 1024,
+    h: t.size_h || 1024,
+    canvasJson: t.canvas_json || undefined,
+    templateName: t.name,
+    templateId: t.id,
+    folderId: t.folder_id ?? "",
+    pages: t.pages,
+  };
+}
+
 export async function listTemplates(folderId?: string | null): Promise<TemplateListItem[]> {
   const params = folderId ? { folder_id: folderId } : {};
   return (await api.get<{ items: TemplateListItem[] }>("/api/templates", { params })).data.items;

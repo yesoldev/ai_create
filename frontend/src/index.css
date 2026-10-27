@@ -48,9 +48,41 @@ body,
   animation: drift 16s ease-in-out infinite;
 }
 
+/* 상단 AI 작업 알림 띠 — 살짝 내려오며 등장 */
+@keyframes jobs-bar-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.jobs-bar-in {
+  animation: jobs-bar-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* 만드는 중 썸네일 자리 — 빛이 지나가는 반짝임 */
+@keyframes jobs-shimmer {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+.jobs-shimmer {
+  background-image: linear-gradient(100deg, transparent 30%, rgb(255 255 255 / 0.55) 50%, transparent 70%);
+  background-size: 200% 100%;
+  animation: jobs-shimmer 1.6s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rise,
-  .drift {
+  .drift,
+  .jobs-bar-in,
+  .jobs-shimmer {
     animation: none;
   }
 }

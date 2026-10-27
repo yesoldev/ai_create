@@ -225,7 +225,7 @@ function WorkDetailDialog({
             <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">{d ? fmtDate(d.created_at, true) : " "}</p>
             <h3 className="truncate text-2xl font-bold">{d?.project_name || "제목 없음"}</h3>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button onClick={onPrev} disabled={!onPrev} className={navBtn} aria-label="이전 작품">
               <Icon icon="ph:caret-left-bold" /> 이전
             </button>

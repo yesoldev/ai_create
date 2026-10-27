@@ -1,3 +1,4 @@
+import { expectJobDone, openLatestResult } from "./helpers";
 import { test, expect, type Page } from "@playwright/test";
 
 const FAKE_PNG =
@@ -27,7 +28,7 @@ async function reachResult(page: Page) {
   await page.getByLabel("만들고 싶은 그림 설명").fill("테스트");
   await page.getByRole("button", { name: "다음", exact: true }).click();
   await page.getByRole("button", { name: "만들기", exact: true }).click();
-  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
+  await expectJobDone(page);
 }
 
 test("편집기: 결과에서 열어 글자 추가·되돌리기·저장", async ({ page }) => {
@@ -35,7 +36,7 @@ test("편집기: 결과에서 열어 글자 추가·되돌리기·저장", async
   await reachResult(page);
 
   // 결과 → 편집기
-  await page.getByRole("button", { name: /글자 수정 또는 추가/ }).click();
+  await openLatestResult(page);
   await expect(page).toHaveURL(/\/editor$/);
   await expect(page.getByRole("button", { name: "글자 넣기" })).toBeVisible();
 
@@ -57,7 +58,7 @@ test("편집기: 결과에서 열어 글자 추가·되돌리기·저장", async
   const dl = page.waitForEvent("download");
   await page.getByRole("button", { name: "PNG", exact: true }).click();
   const d = await dl;
-  expect(d.suggestedFilename()).toMatch(/홍보물_1\.png/);
+  expect(d.suggestedFilename()).toMatch(/테스트 프로젝트_1\.png/);
 });
 
 test("편집기: AI로 글자 수정하면 template_id로 새 페이지를 추가한다", async ({ page }) => {
@@ -82,7 +83,7 @@ test("편집기: AI로 글자 수정하면 template_id로 새 페이지를 추�
   await page.getByLabel("만들고 싶은 그림 설명").fill("테스트");
   await page.getByRole("button", { name: "다음", exact: true }).click();
   await page.getByRole("button", { name: "만들기", exact: true }).click();
-  await page.getByRole("button", { name: /글자 수정 또는 추가/ }).click();
+  await openLatestResult(page);
   await expect(page).toHaveURL(/\/editor$/);
 
   // AI로 글자 수정 → 기존 프로젝트(template_id) 갱신 요청
@@ -122,7 +123,7 @@ test("편집기: AI 사이즈 수정 시 입력한 새 크기로 생성된다", 
   await page.getByLabel("만들고 싶은 그림 설명").fill("테스트");
   await page.getByRole("button", { name: "다음", exact: true }).click();
   await page.getByRole("button", { name: "만들기", exact: true }).click();
-  await page.getByRole("button", { name: /글자 수정 또는 추가/ }).click();
+  await openLatestResult(page);
   await expect(page).toHaveURL(/\/editor$/);
 
   // 글자 입력 없이 사이즈만 변경
@@ -143,7 +144,7 @@ test("편집기: 변경 후 나가면 저장 확인 모달이 뜬다", async ({ 
   await login(page);
   await page.route("**/api/templates/*", (r) => r.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
   await reachResult(page);
-  await page.getByRole("button", { name: /글자 수정 또는 추가/ }).click();
+  await openLatestResult(page);
   await page.getByRole("button", { name: "글자 넣기" }).click(); // 변경 발생
 
   // 뒤로 → 저장 확인 모달

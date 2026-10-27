@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useJobs } from "../lib/jobs";
 import { Icon } from "@iconify/react";
-import { listTemplates, getTemplate, deleteTemplate, uploadProject, type TemplateListItem } from "../lib/library";
+import { listTemplates, getTemplate, editorStateOf, deleteTemplate, uploadProject, type TemplateListItem } from "../lib/library";
 import { listFolders, createFolder, deleteFolder, withDepth, type Folder } from "../lib/folders";
 import { InputDialog, ConfirmDialog, useDismiss } from "../components/dialogs";
 
@@ -64,6 +65,13 @@ export default function Library() {
     loadTemplates(null);
   }, []);
 
+  // AI 작업이 끝나면 지금 보고 있는 폴더 목록을 다시 불러온다(새 프로젝트가 바로 보이게)
+  const { doneTick } = useJobs();
+  useEffect(() => {
+    if (doneTick) loadTemplates(sel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doneTick]);
+
   function pick(id: string | null) {
     setSel(id);
     loadTemplates(id);
@@ -96,18 +104,7 @@ export default function Library() {
     setOpening(id);
     try {
       const t = await getTemplate(id);
-      nav("/editor", {
-        state: {
-          imageUrl: t.bg_url || undefined,
-          w: t.size_w || 1024,
-          h: t.size_h || 1024,
-          canvasJson: t.canvas_json || undefined,
-          templateName: t.name,
-          templateId: t.id,
-          folderId: t.folder_id ?? "",
-          pages: t.pages,
-        },
-      });
+      nav("/editor", { state: editorStateOf(t) });
     } finally {
       setOpening(null);
     }

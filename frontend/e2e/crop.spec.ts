@@ -1,7 +1,7 @@
 // 편집기 이미지 자르기 E2E — 백엔드 없이 모킹으로 돈다.
 // 실행: PW_NO_BACKEND=1 npx playwright test e2e/crop.spec.ts
 import { test, expect, type Page } from "@playwright/test";
-import { OK, login, fillWizard, svgImage } from "./helpers";
+import { OK, login, fillWizard, svgImage, openLatestResult } from "./helpers";
 
 // 400×200 그림 → 편집기 표시 배율 1배(창 1280×720 기준)라 자르기 계산이 그대로 보인다
 const IMG = svgImage(400, 200);
@@ -26,8 +26,7 @@ async function openEditor(page: Page) {
   );
   await fillWizard(page);
   await page.getByRole("button", { name: "만들기", exact: true }).click();
-  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
-  await page.getByRole("button", { name: /글자 수정 또는 추가/ }).click();
+  await openLatestResult(page, { image: IMG, w: 400, h: 200 });
   await expect(page).toHaveURL(/\/editor$/);
   await expect(page.getByRole("button", { name: "자르기" })).toBeEnabled();
 }

@@ -1,7 +1,7 @@
 // 안전 검사(모더레이션) 오탐 → 자동 재시도 + 한글 오류 안내 E2E.
 // 백엔드 없이 돌린다(모든 /api 응답 모킹). 실행: PW_NO_BACKEND=1 npx playwright test e2e/safety-retry.spec.ts
 import { test, expect } from "@playwright/test";
-import { FAKE_PNG, OK, login, fillWizard } from "./helpers";
+import { FAKE_PNG, OK, login, fillWizard, expectJobDone } from "./helpers";
 
 test("안전 검사에 걸리면 안내를 띄우고 자동으로 다시 만든다", async ({ page }) => {
   await login(page);
@@ -39,12 +39,14 @@ test("안전 검사에 걸리면 안내를 띄우고 자동으로 다시 만든�
   await fillWizard(page);
   await page.getByRole("button", { name: "만들기", exact: true }).click();
 
-  // 재시도 안내가 화면에 보인다
+  // 재시도 안내가 작업 패널에 보인다(상단 알림 → 패널)
+  await page.getByRole("button", { name: /자세히 보기/ }).click();
   await expect(page.getByText(/안전 검사에 걸려서 다시 만들고 있어요 \(2번째 시도 \/ 최대 3번\)/)).toBeVisible({
     timeout: 10_000,
   });
-  // 재시도가 성공하면 결과 화면
-  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
+  // 재시도가 성공하면 완성으로 바뀐다
+  await expect(page.getByRole("dialog", { name: "AI 작업 목록" }).getByRole("button", { name: "바로가기" })).toBeVisible({ timeout: 10_000 });
+  await expectJobDone(page);
   expect(levels).toEqual([0, 1]); // 안전 단계를 올려 가며 재시도
 });
 
@@ -63,6 +65,7 @@ test("3번 모두 안전 검사에 막히면 한글 안내를 보여준다(영�
 
   await fillWizard(page);
   await page.getByRole("button", { name: "만들기", exact: true }).click();
+  await page.getByRole("button", { name: /자세히 보기/ }).click();
 
   await expect(page.getByText(/여러 번 다시 시도했지만 OpenAI 안전 검사를 통과하지 못했어요/)).toBeVisible({
     timeout: 20_000,
@@ -85,5 +88,8 @@ test("서버·네트워크 오류도 영어 대신 한글 안내가 뜬다", asy
 
   await fillWizard(page);
   await page.getByRole("button", { name: "만들기", exact: true }).click();
+  // 실패도 상단 알림에 뜨고, 패널에서 한글 사유를 본다
+  await expect(page.getByText(/1개 실패/)).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("button", { name: /자세히 보기/ }).click();
   await expect(page.getByText(/지금 AI 서버에 요청이 많이 몰려 있어요/)).toBeVisible({ timeout: 10_000 });
 });

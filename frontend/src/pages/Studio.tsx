@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@iconify/react";
 import { useAuth } from "../lib/auth";
+import { useJobs } from "../lib/jobs";
 import {
   SIZES,
   MAX_PX,
@@ -22,18 +23,13 @@ import {
   inputItems,
   IMAGE_MODELS,
   DEFAULT_IMAGE_MODEL,
-  errorInfo,
-  isSafetyBlocked,
-  SAFETY_FAIL_MSG,
   uploadRef,
   copywrite,
   krw,
-  downloadImage,
   getRecentPrompts,
   pushRecentPrompt,
   listGenerations,
   type Estimate,
-  type GenerateResult,
   type SizePreset,
   type Unit,
   type BizType,
@@ -41,9 +37,7 @@ import {
   type ColorChoice,
   type Freedom,
 } from "../lib/studio";
-import { listFolders, createFolder, withDepth, type Folder } from "../lib/folders";
-import { updateTemplate } from "../lib/library";
-import { InputDialog, useDismiss } from "../components/dialogs";
+import { useDismiss } from "../components/dialogs";
 
 type Kind = "banner" | "flyer";
 const QUALITIES = [
@@ -53,15 +47,6 @@ const QUALITIES = [
 ];
 
 const STEP_LABELS = ["종류", "업종", "크기·품질", "문구", "만들기"];
-
-// 생성 중 표시할 AI 작업 상태(순환)
-const LOADING_STEPS = [
-  { icon: "ph:brain-duotone", text: "무엇을 그릴지 생각하고 있어요" },
-  { icon: "ph:paint-roller-duotone", text: "바탕을 칠하는 중이에요" },
-  { icon: "ph:palette-duotone", text: "색을 입히는 중이에요" },
-  { icon: "ph:text-aa-duotone", text: "글자와 모양을 다듬는 중이에요" },
-  { icon: "ph:sparkle-duotone", text: "마무리하는 중이에요" },
-];
 
 export default function Studio() {
   const nav = useNavigate();
@@ -98,16 +83,6 @@ export default function Studio() {
   const [showRefPicker, setShowRefPicker] = useState(false);
   const [showRecentPrompts, setShowRecentPrompts] = useState(false);
 
-  // 결과 화면: 제목·폴더 저장 + '비슷하게 다시 만들기' 보완 프롬프트
-  const [folders, setFolders] = useState<Folder[]>([]);
-  const [projName, setProjName] = useState("");
-  const [projFolderId, setProjFolderId] = useState("");
-  const [projSaving, setProjSaving] = useState(false);
-  const [projSaved, setProjSaved] = useState(false);
-  const [newFolderOpen, setNewFolderOpen] = useState(false);
-  const [regenOpen, setRegenOpen] = useState(false);
-  const [regenText, setRegenText] = useState("");
-
   // 관리자 설정 기본 사이즈 → 종류별 첫 번째(추천) 옵션으로
   const [adminSizes, setAdminSizes] = useState<{ banner: { w: number; h: number }; flyer: { w: number; h: number } } | null>(null);
   function sizeOptions(k: Kind): SizePreset[] {
@@ -122,9 +97,6 @@ export default function Studio() {
     listGenerations()
       .then(setRecentGens)
       .catch(() => setRecentGens([]));
-    listFolders()
-      .then(setFolders)
-      .catch(() => setFolders([]));
     fetchDefaultSizes()
       .then(setAdminSizes)
       .catch(() => setAdminSizes(null));
@@ -148,38 +120,14 @@ export default function Studio() {
     }
   }
   const [estimate, setEstimate] = useState<Estimate | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [busyStep, setBusyStep] = useState(0);
-  const [retryNote, setRetryNote] = useState(""); // 안전 검사 재시도 안내
-  const [error, setError] = useState("");
-  const [result, setResult] = useState<GenerateResult | null>(null);
+  const { start: startJob, setPanelOpen } = useJobs();
+  const [startedTitle, setStartedTitle] = useState(""); // 방금 백그라운드로 넘긴 작업 이름(안내용)
 
-  // 단계가 바뀌거나 결과가 나오면 화면 맨 위부터 보이게.
+  // 단계가 바뀌면 화면 맨 위부터 보이게.
   // (앞 단계에서 아래로 스크롤한 상태 그대로 넘어가면 새 화면의 중간·하단이 보인다)
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "auto" });
-  }, [step, result]);
-
-  // 생성 중일 때 상태 메시지 순환
-  useEffect(() => {
-    if (!busy) return;
-    setBusyStep(0);
-    const t = setInterval(() => {
-      setBusyStep((s) => Math.min(s + 1, LOADING_STEPS.length - 1));
-    }, 3500);
-    return () => clearInterval(t);
-  }, [busy]);
-
-  // 생성 결과가 나오면 제목/폴더 저장 상태 초기화
-  //  (사용자가 만들기 단계에서 입력한 제목 우선 → 없으면 서버가 지은 이름)
-  useEffect(() => {
-    if (result) {
-      setProjName(title.trim() || result.project_name || "새 홍보물");
-      setProjFolderId("");
-      setProjSaved(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [result]);
+  }, [step]);
 
   // 실제 생성 크기(px): 직접 입력이면 환산+상한, 아니면 프리셋
   const effW = custom ? Math.min(toPx(cw, unit), MAX_PX) : size?.w ?? 0;
@@ -221,75 +169,63 @@ export default function Studio() {
     setStep(3);
   }
 
-  async function onGenerate(refGenerationId?: string, extraPrompt?: string) {
+  /** 만들기 — 백그라운드 작업으로 넘기고 마법사는 처음으로 돌아간다(그동안 또 만들 수 있게) */
+  function onGenerate() {
     if (!effW || !effH) return;
-    setBusy(true);
-    setError("");
-    setRetryNote("");
-    try {
-      // 참고 이미지: "비슷하게 다시 만들기"(인자) 우선, 아니면 업로드/최근이미지
-      let refUploadId: string | undefined;
-      if (!refGenerationId && refFile) {
-        refUploadId = await uploadRef(refFile);
-      }
-      const refId = refGenerationId || (refUploadId ? undefined : refGen?.id);
-      const hasRef = !!refId || !!refUploadId;
-      const isFlyer = kind === "flyer";
-      // 그림에 넣을 글자: 전단지는 업체명+전단지 문구(여러 줄), 배너는 업체명+짧은 문구
-      const wantedText = isFlyer
-        ? [bizName.trim(), flyerText.trim()].filter(Boolean).join("\n")
-        : [bizName.trim(), textContent.trim()].filter(Boolean).join("\n");
-      const colorHint = color ? ` 전체적인 색감과 분위기를 ${color.name} 계열로 조화롭게 통일해, 밝고 선명하게.` : "";
-      const extra = extraPrompt?.trim() ? ` ${extraPrompt.trim()}.` : "";
-      const hint = isFlyer ? FLYER_HINT : NEWSPAPER_HINT;
-      // 참고 이미지가 있으면 "비슷하게"가 목적이므로 변주를 넣지 않는다.
-      const varied = hasRef ? "" : variationHint(freedom);
-      const fullPrompt = `${bizLabel ? `[업종: ${bizLabel}] ` : ""}${description}.${extra}${colorHint} ${hint}${varied}`;
-      pushRecentPrompt(description); // 다음에 재사용할 수 있게 저장
-      const r = await generateWithRetry(
-        {
-          prompt: fullPrompt,
-          width: effW,
-          height: effH,
-          quality,
-          mode: "ai_text",
-          text_content: wantedText || undefined,
-          // 프로젝트 제목: 입력한 제목 > 업체명 (문구 전체가 제목으로 들어가지 않게)
-          name: title.trim() || bizName.trim() || undefined,
-          kind: kind || undefined,
-          ref_generation_id: refId,
-          ref_upload_id: refUploadId,
-          similarity: hasRef ? 2 : undefined,
-          model: chosenModel,
-          user_input: inputItems([
-            ["종류", kind === "flyer" ? "전단지" : "배너"],
-            ["업종", bizLabel],
-            ["설명", description],
-            ["업체명", bizName],
-            [isFlyer ? "전단지 문구" : "넣을 글자", isFlyer ? flyerText : textContent],
-            ["색감", color?.name],
-            ["참고 이미지", refUploadId ? "직접 올린 이미지와 비슷하게" : refId ? "이전 결과와 비슷하게" : ""],
-            ["추가 요청", extraPrompt],
-            ["제목", title],
-          ]),
-        },
-        // 안전 검사 오탐으로 다시 만드는 중 — 화면에 알려 준다
-        (tryNo, total) => {
-          setRetryNote(`안전 검사에 걸려서 다시 만들고 있어요 (${tryNo}번째 시도 / 최대 ${total}번)`);
-          setBusyStep(0);
-        },
-      );
-      setResult(r);
-    } catch (e: unknown) {
-      setError(isSafetyBlocked(e) ? SAFETY_FAIL_MSG : errorInfo(e).message);
-    } finally {
-      setBusy(false);
-      setRetryNote("");
-    }
+    const isFlyer = kind === "flyer";
+    // 그림에 넣을 글자: 전단지는 업체명+전단지 문구(여러 줄), 배너는 업체명+짧은 문구
+    const wantedText = isFlyer
+      ? [bizName.trim(), flyerText.trim()].filter(Boolean).join("\n")
+      : [bizName.trim(), textContent.trim()].filter(Boolean).join("\n");
+    const colorHint = color ? ` 전체적인 색감과 분위기를 ${color.name} 계열로 조화롭게 통일해, 밝고 선명하게.` : "";
+    const hint = isFlyer ? FLYER_HINT : NEWSPAPER_HINT;
+    const file = refFile; // 마법사를 비우기 전에 붙잡아 둔다
+    const refId = file ? undefined : refGen?.id;
+    const hasRef = !!file || !!refId;
+    // 참고 이미지가 있으면 "비슷하게"가 목적이므로 변주를 넣지 않는다.
+    const varied = hasRef ? "" : variationHint(freedom);
+    const fullPrompt = `${bizLabel ? `[업종: ${bizLabel}] ` : ""}${description}.${colorHint} ${hint}${varied}`;
+    pushRecentPrompt(description); // 다음에 재사용할 수 있게 저장
+    const jobTitle = title.trim() || bizName.trim() || description.trim().slice(0, 24) || "새 홍보물";
+    const payload = {
+      prompt: fullPrompt,
+      width: effW,
+      height: effH,
+      quality,
+      mode: "ai_text" as const,
+      text_content: wantedText || undefined,
+      // 프로젝트 제목: 입력한 제목 > 업체명 (문구 전체가 제목으로 들어가지 않게)
+      name: title.trim() || bizName.trim() || undefined,
+      kind: kind || undefined,
+      ref_generation_id: refId,
+      similarity: hasRef ? 2 : undefined,
+      model: chosenModel,
+      user_input: inputItems([
+        ["종류", isFlyer ? "전단지" : "배너"],
+        ["업종", bizLabel],
+        ["설명", description],
+        ["업체명", bizName],
+        [isFlyer ? "전단지 문구" : "넣을 글자", isFlyer ? flyerText : textContent],
+        ["색감", color?.name],
+        ["참고 이미지", file ? "직접 올린 이미지와 비슷하게" : refId ? "이전 결과와 비슷하게" : ""],
+        ["제목", title],
+      ]),
+    };
+    startJob({
+      kind: "new",
+      title: jobTitle,
+      run: async (setNote) => {
+        const refUploadId = file ? await uploadRef(file) : undefined;
+        return generateWithRetry({ ...payload, ref_upload_id: refUploadId }, (tryNo, total) =>
+          setNote(`안전 검사에 걸려서 다시 만들고 있어요 (${tryNo}번째 시도 / 최대 ${total}번)`),
+        );
+      },
+    });
+    restart();
+    setStartedTitle(jobTitle);
   }
 
   function restart() {
-    setResult(null);
     setStep(1);
     setKind(null);
     setBiz(null);
@@ -313,269 +249,30 @@ export default function Studio() {
     nav("/");
   }
 
-  // 결과 프로젝트의 제목·폴더 저장
-  async function saveProject() {
-    if (!result || !projName.trim()) return;
-    setProjSaving(true);
-    try {
-      await updateTemplate(result.project_id, {
-        name: projName.trim(),
-        folder_id: projFolderId || null,
-        move_to_root: !projFolderId,
-      });
-      setProjSaved(true);
-    } catch {
-      /* 저장 실패 시 조용히 무시 — 최근 만든 것에는 이미 남아 있음 */
-    } finally {
-      setProjSaving(false);
-    }
-  }
-
-  async function addFolder(name: string) {
-    try {
-      const f = await createFolder(name);
-      setFolders((prev) => [...prev, f]);
-      setProjFolderId(f.id);
-    } catch {
-      /* 무시 */
-    } finally {
-      setNewFolderOpen(false);
-    }
-  }
-
-  // "비슷하게 다시 만들기" — 보완 프롬프트 입력 후 진행
-  function startRegen() {
-    setRegenText("");
-    setRegenOpen(true);
-  }
-  function confirmRegen() {
-    if (!result) return;
-    const extra = regenText;
-    setRegenOpen(false);
-    onGenerate(result.generation_id, extra);
-  }
-
-  async function handleDownload(url: string, format: "png" | "jpg") {
-    try {
-      const fname = title.trim() || result?.project_name || "홍보물";
-      await downloadImage(url, format, fname);
-    } catch {
-      alert("내려받기에 실패했어요. 잠시 후 다시 시도해 주세요.");
-    }
-  }
-
-  // ───────── 결과 화면 (생성 중이면 아래 busy 화면을 먼저 보여줌) ─────────
-  if (result && !busy) {
-    return (
-      <Shell onExit={() => nav("/")}>
-        <div className="mx-auto max-w-3xl">
-          <h1 className="flex items-center gap-2 text-3xl font-bold">
-            <Icon icon="ph:check-circle-duotone" className="text-emerald-500" />
-            완성됐어요!
-          </h1>
-          <p className="mt-2 text-lg text-neutral-500 dark:text-neutral-400">
-            아래에서 그림을 내려받으세요. 이번에 <b>{krw(result.cost_krw)}</b> 썼어요
-            {result.remaining_krw === null ? " (잔액 무제한)." : (
-              <> · 이번 달 남은 금액 <b>{krw(result.remaining_krw)}</b>.</>
-            )}
-          </p>
-
-          <div className="mt-6 overflow-hidden rounded-3xl border-2 border-neutral-200 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900">
-            <img src={result.image_url} alt="만든 홍보물" className="mx-auto max-h-[62vh] w-auto" />
-          </div>
-
-          <div className="mt-6 grid gap-3 sm:grid-cols-2">
-            <BigButton
-              icon="ph:pencil-simple-bold"
-              onClick={() =>
-                nav("/editor", {
-                  state: {
-                    imageUrl: result.image_url,
-                    w: effW,
-                    h: effH,
-                    generationId: result.generation_id,
-                    templateId: result.project_id,
-                    quality,
-                    model: chosenModel,
-                    kind,
-                    pages: [
-                      { id: result.page_id, sort_order: 0, bg_url: result.image_url, canvas_json: null },
-                    ],
-                  },
-                })
-              }
-            >
-              글자 수정 또는 추가
-            </BigButton>
-            <BigButton icon="ph:arrows-clockwise-bold" tone="soft" onClick={startRegen}>
-              비슷하게 다시 만들기
-            </BigButton>
-          </div>
-
-          {/* 저장 위치: 제목 + 폴더 (자동 생성된 프로젝트를 정리) */}
-          <div className="mt-6 rounded-3xl border-2 border-neutral-200 p-5 dark:border-neutral-800">
-            <p className="flex items-center gap-2 text-lg font-semibold">
-              <Icon icon="ph:folder-open-duotone" className="text-emerald-600 text-[24px]" />
-              보관함에 저장하기
-            </p>
-            <p className="mt-1 text-base text-neutral-500 dark:text-neutral-400">
-              제목을 정하고 폴더를 골라 두면 나중에 쉽게 찾을 수 있어요.
-            </p>
-            <label htmlFor="projname" className="mt-4 mb-1 block text-base font-semibold">제목</label>
-            <input
-              id="projname"
-              value={projName}
-              onChange={(e) => {
-                setProjName(e.target.value);
-                setProjSaved(false);
-              }}
-              placeholder="예) 봄맞이 할인 배너"
-              className="h-14 w-full rounded-2xl border-2 border-neutral-200 bg-neutral-50 px-4 text-lg outline-none focus:border-emerald-500 dark:border-neutral-800 dark:bg-neutral-900"
-            />
-            <label htmlFor="projfolder" className="mt-4 mb-1 block text-base font-semibold">폴더</label>
-            <div className="flex flex-wrap gap-2">
-              <select
-                id="projfolder"
-                value={projFolderId}
-                onChange={(e) => {
-                  setProjFolderId(e.target.value);
-                  setProjSaved(false);
-                }}
-                className="h-14 flex-1 rounded-2xl border-2 border-neutral-200 bg-neutral-50 px-3 text-lg outline-none focus:border-emerald-500 dark:border-neutral-800 dark:bg-neutral-900"
-              >
-                <option value="">폴더 없음</option>
-                {withDepth(folders).map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {" ".repeat(f.depth * 2)}
-                    {f.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => setNewFolderOpen(true)}
-                className="flex h-14 items-center gap-1.5 rounded-2xl border-2 border-neutral-200 px-4 text-base font-semibold text-neutral-600 hover:border-emerald-400 hover:bg-emerald-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-emerald-950/30"
-              >
-                <Icon icon="ph:folder-plus-duotone" className="text-emerald-600 text-[20px]" /> 새 폴더
-              </button>
-            </div>
-            <div className="mt-4 flex items-center gap-3">
-              <BigButton icon={projSaved ? "ph:check-bold" : "ph:floppy-disk-bold"} tone={projSaved ? "soft" : "primary"} disabled={projSaving || !projName.trim()} onClick={saveProject}>
-                {projSaving ? "저장 중..." : projSaved ? "저장됨" : "이 위치에 저장"}
-              </BigButton>
-              {projSaved && (
-                <span className="flex items-center gap-1 text-base text-emerald-700 dark:text-emerald-300">
-                  <Icon icon="ph:check-circle-fill" /> 보관함에 저장했어요
-                </span>
-              )}
-            </div>
-          </div>
-
-          <p className="mt-6 mb-2 text-lg font-semibold">또는 바로 내려받기</p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <BigButton icon="ph:download-simple-bold" tone="soft" onClick={() => handleDownload(result.image_url, "png")}>
-              PNG로 내려받기
-            </BigButton>
-            <BigButton icon="ph:download-simple-bold" tone="ghost" onClick={() => handleDownload(result.image_url, "jpg")}>
-              JPG로 내려받기
-            </BigButton>
-          </div>
-          <p className="mt-3 text-center text-base text-neutral-500 dark:text-neutral-400">
-            PNG는 배경이 비칠 수 있어요 · JPG는 파일이 작아요
-          </p>
-
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <BigButton icon="ph:arrow-counter-clockwise-bold" tone="soft" onClick={restart}>
-              다른 홍보물 또 만들기
-            </BigButton>
-            <BigButton icon="ph:folders-bold" tone="ghost" onClick={() => nav("/library")}>
-              보관함으로 이동
-            </BigButton>
-          </div>
-        </div>
-
-        {/* 비슷하게 다시 만들기 — 보완 프롬프트 입력 (#2) */}
-        {regenOpen && (
-          <PickerModal
-            title="어떻게 바꿀까요?"
-            desc="이번 그림과 비슷하게 다시 만들어요. 바꾸고 싶은 점을 적으면 반영해요. (비워 두면 그대로 비슷하게)"
-            icon="ph:arrows-clockwise-duotone"
-            onClose={() => setRegenOpen(false)}
-          >
-            <textarea
-              autoFocus
-              value={regenText}
-              onChange={(e) => setRegenText(e.target.value)}
-              rows={3}
-              placeholder="예) 배경을 더 밝게, 글자를 더 크게"
-              className="w-full rounded-2xl border-2 border-neutral-200 bg-neutral-50 p-4 text-lg outline-none focus:border-emerald-500 dark:border-neutral-800 dark:bg-neutral-900"
-            />
-            <div className="mt-4 flex gap-2">
-              <BigButton icon="ph:magic-wand-bold" onClick={confirmRegen}>
-                다시 만들기
-              </BigButton>
-              <BigButton icon="ph:x-bold" tone="ghost" onClick={() => setRegenOpen(false)}>
-                취소
-              </BigButton>
-            </div>
-          </PickerModal>
-        )}
-
-        <InputDialog
-          open={newFolderOpen}
-          icon="ph:folder-plus-duotone"
-          title="새 폴더 만들기"
-          placeholder="예) 봄 행사"
-          confirmLabel="만들기"
-          onConfirm={addFolder}
-          onClose={() => setNewFolderOpen(false)}
-        />
-      </Shell>
-    );
-  }
-
-  // ───────── 생성 중 ─────────
-  if (busy) {
-    const msg = LOADING_STEPS[Math.min(busyStep, LOADING_STEPS.length - 1)];
-    return (
-      <Shell onExit={() => nav("/")}>
-        <div className="mx-auto flex max-w-lg flex-col items-center py-20 text-center">
-          <Icon icon="ph:spinner-gap-bold" className="animate-spin text-6xl text-emerald-500" />
-          <h1 className="mt-6 text-3xl font-bold">그림을 만들고 있어요</h1>
-          <p className="mt-3 flex items-center gap-2 text-xl font-semibold text-emerald-700 dark:text-emerald-300">
-            <Icon icon={msg.icon} className="text-[24px]" />
-            {msg.text}
-          </p>
-          <p className="mt-2 text-lg text-neutral-500 dark:text-neutral-400">
-            30초쯤 걸려요. 잠시만 기다려 주세요.
-          </p>
-          {retryNote && (
-            <div className="mt-5 flex items-start gap-3 rounded-2xl border-2 border-amber-300 bg-amber-50 px-5 py-4 text-left dark:border-amber-500/50 dark:bg-amber-500/10">
-              <Icon icon="ph:arrow-clockwise-bold" className="mt-0.5 shrink-0 animate-spin text-2xl text-amber-600 dark:text-amber-400" />
-              <div>
-                <p className="text-lg font-bold text-amber-800 dark:text-amber-200">{retryNote}</p>
-                <p className="mt-1 text-base text-amber-700 dark:text-amber-300/90">
-                  AI 안전 검사가 멀쩡한 그림도 가끔 잘못 걸러요. 조건을 바꿔 다시 만드는 중이니 조금만 더 기다려 주세요.
-                </p>
-              </div>
-            </div>
-          )}
-          {/* 진행 점 */}
-          <div className="mt-5 flex gap-2">
-            {LOADING_STEPS.map((_, i) => (
-              <span key={i} className={`h-2.5 w-2.5 rounded-full ${i <= busyStep ? "bg-emerald-500" : "bg-neutral-200 dark:bg-neutral-700"}`} />
-            ))}
-          </div>
-        </div>
-      </Shell>
-    );
-  }
-
   // ───────── 마법사 ─────────
   return (
     <Shell onExit={guardedExit}>
       <Steps step={step} />
       <div className="mx-auto mt-8 max-w-3xl">
+        {startedTitle && step === 1 && (
+          <div role="status" className="rise mb-8 flex flex-wrap items-center gap-4 rounded-3xl border-2 border-emerald-200 bg-emerald-50 px-5 py-4 dark:border-emerald-900/60 dark:bg-emerald-950/30">
+            <span className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-emerald-600 text-white">
+              <Icon icon="ph:paper-plane-tilt-duotone" className="text-[30px]" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-xl font-bold">“{startedTitle}” 만들기를 시작했어요</p>
+              <p className="mt-0.5 text-base text-neutral-600 dark:text-neutral-300">
+                30초쯤 걸려요. 화면 위쪽 알림에서 진행 상황을 볼 수 있고, 그동안 다른 홍보물을 또 만들어도 돼요.
+              </p>
+            </div>
+            <button
+              onClick={() => setPanelOpen(true)}
+              className="flex h-12 items-center gap-1.5 rounded-2xl bg-white px-4 text-lg font-bold text-emerald-800 ring-2 ring-emerald-300 hover:bg-emerald-100 dark:bg-neutral-900 dark:text-emerald-200 dark:ring-emerald-800"
+            >
+              진행 상황 보기 <Icon icon="ph:caret-right-bold" />
+            </button>
+          </div>
+        )}
         {step === 1 && (
           <Section title="무엇을 만들까요?" desc="하나를 골라 주세요.">
             <div className="grid gap-4 sm:grid-cols-2">
@@ -1027,12 +724,6 @@ export default function Studio() {
               )}
             </dl>
             <EstimateBar estimate={estimate} />
-            {error && (
-              <div role="alert" className="mt-4 flex items-start gap-3 rounded-2xl border-2 border-red-200 bg-red-50 px-4 py-3 text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
-                <Icon icon="ph:warning-circle-fill" className="mt-0.5 text-[22px]" />
-                <span className="text-base">{error}</span>
-              </div>
-            )}
           </Section>
         )}
 

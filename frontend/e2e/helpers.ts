@@ -61,3 +61,35 @@ export async function fillWizard(page: Page) {
   await page.getByRole("button", { name: "다음", exact: true }).click();
   await expect(page.getByRole("heading", { name: "이대로 만들까요?" })).toBeVisible();
 }
+
+/** 백그라운드 생성이 끝날 때까지 기다린다(상단 알림 바의 '완성됐어요') */
+export async function expectJobDone(page: Page) {
+  await expect(page.getByText(/개 완성됐어요/)).toBeVisible({ timeout: 15_000 });
+}
+
+/** 상단 알림 → 작업 패널 → '바로가기'로 결과 프로젝트를 편집기에서 연다(보관함에서 고른 것과 같다) */
+export async function openLatestResult(page: Page, opts: { image?: string; w?: number; h?: number } = {}) {
+  const { image = FAKE_PNG, w = 1024, h = 400 } = opts;
+  // 프로젝트 상세(GET /api/templates/{id}) 모킹 — 나중에 등록한 라우트가 먼저 걸린다
+  await page.route(/\/api\/templates\/[^/?]+$/, async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const id = new URL(route.request().url()).pathname.split("/").pop();
+    await route.fulfill(
+      OK({
+        id,
+        name: "테스트 프로젝트",
+        canvas_json: null,
+        size_w: w,
+        size_h: h,
+        folder_id: null,
+        bg_url: image,
+        thumb_url: image,
+        pages: [{ id: "pg1", sort_order: 0, bg_url: image, thumb_url: image, canvas_json: null }],
+      }),
+    );
+  });
+  await expectJobDone(page);
+  await page.getByRole("button", { name: /자세히 보기/ }).click();
+  await page.getByRole("dialog", { name: "AI 작업 목록" }).getByRole("button", { name: "바로가기" }).first().click();
+  await expect(page).toHaveURL(/\/editor$/);
+}

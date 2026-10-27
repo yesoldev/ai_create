@@ -1,3 +1,4 @@
+import { openLatestResult } from "./helpers";
 import { test, expect, type Page } from "@playwright/test";
 
 const FAKE_PNG =
@@ -13,7 +14,7 @@ async function login(page: Page) {
 
 test("보관함: 편집기에서 저장하고 다시 열기", async ({ page }) => {
   await page.route("**/api/generate", (r) =>
-    r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ generation_id: "gen1", image_url: FAKE_PNG, thumb_url: FAKE_PNG, size: "500x200", cost_krw: 8, remaining_krw: null }) }),
+    r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ generation_id: "gen1", project_id: "tpl1", page_id: "pg1", image_url: FAKE_PNG, thumb_url: FAKE_PNG, size: "500x200", cost_krw: 8, remaining_krw: null }) }),
   );
   // 템플릿 저장/목록/상세 모킹
   await page.route("**/api/templates", (route) => {
@@ -29,6 +30,9 @@ test("보관함: 편집기에서 저장하고 다시 열기", async ({ page }) =
   });
   await page.route("**/api/folders/tree", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [{ id: "f1", parent_id: null, name: "OO식당", sort_order: 0 }] }) }),
+  );
+  await page.route("**/api/templates/tpl1/pages", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) }),
   );
   await page.route("**/api/templates/tpl1", (route) =>
     route.fulfill({
@@ -49,13 +53,14 @@ test("보관함: 편집기에서 저장하고 다시 열기", async ({ page }) =
   await page.getByLabel("만들고 싶은 그림 설명").fill("테스트");
   await page.getByRole("button", { name: "다음", exact: true }).click();
   await page.getByRole("button", { name: "만들기", exact: true }).click();
-  await page.getByRole("button", { name: /글자 수정 또는 추가/ }).click();
+  await openLatestResult(page);
   await expect(page).toHaveURL(/\/editor$/);
 
   // 보관함에 저장
   await page.getByRole("button", { name: /보관함에 저장/ }).click();
   await page.getByPlaceholder("예) 봄맞이 할인 배너").fill("봄맞이 배너");
-  const saveReq = page.waitForRequest((r) => r.url().endsWith("/api/templates") && r.method() === "POST");
+  // 생성하면 프로젝트가 자동으로 생기므로, 저장은 그 프로젝트의 이름·폴더 수정(PATCH)이다
+  const saveReq = page.waitForRequest((r) => r.url().endsWith("/api/templates/tpl1") && r.method() === "PATCH");
   await page.getByRole("button", { name: /^저장/ }).click();
   await saveReq;
   await expect(page.getByText("보관함에 저장했어요.")).toBeVisible();

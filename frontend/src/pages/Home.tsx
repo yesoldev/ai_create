@@ -4,7 +4,8 @@ import { Icon } from "@iconify/react";
 import { api } from "../lib/api";
 import { krw, downloadImage } from "../lib/studio";
 import { useAuth } from "../lib/auth";
-import { listTemplates, getTemplate, type TemplateListItem } from "../lib/library";
+import { useJobs } from "../lib/jobs";
+import { listTemplates, getTemplate, editorStateOf, type TemplateListItem } from "../lib/library";
 import { useDismiss } from "../components/dialogs";
 
 interface Usage {
@@ -30,30 +31,20 @@ export default function Home() {
   const [opening, setOpening] = useState(false);
   const [picked, setPicked] = useState<Gen | null>(null); // 최근 만든 것 클릭 시 다운로드/편집
   const pickedDismiss = useDismiss(() => setPicked(null));
+  const { doneTick } = useJobs(); // AI 작업이 끝나면 목록을 다시 불러온다
 
   useEffect(() => {
     api.get<Usage>("/api/usage/me").then((r) => setUsage(r.data)).catch(() => {});
     listTemplates().then(setProjects).catch(() => {});
     api.get<{ items: Gen[] }>("/api/generations").then((r) => setGens(r.data.items)).catch(() => {});
-  }, []);
+  }, [doneTick]);
 
   async function openProject(templateId: string) {
     if (opening) return;
     setOpening(true);
     try {
       const t = await getTemplate(templateId);
-      nav("/editor", {
-        state: {
-          imageUrl: t.bg_url || undefined,
-          w: t.size_w || 1024,
-          h: t.size_h || 1024,
-          canvasJson: t.canvas_json || undefined,
-          templateName: t.name,
-          templateId: t.id,
-          folderId: t.folder_id ?? "",
-          pages: t.pages,
-        },
-      });
+      nav("/editor", { state: editorStateOf(t) });
     } finally {
       setOpening(false);
     }

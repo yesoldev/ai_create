@@ -12,15 +12,8 @@ import {
   type TemplatePage,
 } from "../lib/library";
 import { listFolders, withDepth, type Folder } from "../lib/folders";
-import {
-  generateWithRetry,
-  inputItems,
-  uploadRef,
-  krw,
-  errorInfo,
-  isSafetyBlocked,
-  SAFETY_FAIL_MSG,
-} from "../lib/studio";
+import { generateWithRetry, inputItems, uploadRef, krw, errorInfo } from "../lib/studio";
+import { useJobs, useTicker, elapsedText } from "../lib/jobs";
 import { api } from "../lib/api";
 import { ConfirmDialog, useDismiss } from "../components/dialogs";
 
@@ -87,14 +80,6 @@ function loadImg(url: string): Promise<HTMLImageElement> {
   });
 }
 
-// AI 글자 수정 중 표시할 상태(순환)
-const AI_STEPS = [
-  { icon: "ph:brain-duotone", text: "요청한 내용을 이해하는 중이에요" },
-  { icon: "ph:eye-duotone", text: "지금 그림을 살펴보는 중이에요" },
-  { icon: "ph:text-aa-duotone", text: "글자를 고치는 중이에요" },
-  { icon: "ph:sparkle-duotone", text: "자연스럽게 다듬는 중이에요" },
-];
-
 export default function Editor() {
   const nav = useNavigate();
   const loc = useLocation();
@@ -144,10 +129,13 @@ export default function Editor() {
   // AI로 글자 수정/추가
   const [aiOpen, setAiOpen] = useState(false);
   const [aiText, setAiText] = useState("");
-  const [aiBusy, setAiBusy] = useState(false);
-  const [aiStep, setAiStep] = useState(0);
   const [aiMsg, setAiMsg] = useState("");
-  const [aiRetry, setAiRetry] = useState(""); // 안전 검사 재시도 안내
+  // AI 수정은 백그라운드 작업 — 이 프로젝트의 작업이 돌고 있으면 버튼이 돌고 안내가 뜬다
+  const { jobs, start: startJob, consume, setPanelOpen } = useJobs();
+  const isMine = (j: { templateId?: string }) => !!st.templateId && j.templateId === st.templateId;
+  const aiJob = jobs.find((j) => j.status === "running" && isMine(j));
+  const aiBusy = !!aiJob;
+  useTicker(aiBusy);
   const [remaining, setRemaining] = useState<number | null | undefined>(undefined); // 이번 달 잔액
   // AI로 크기 변경 (px) — '사이즈 수정' 눌렀을 때만 입력·적용
   const [sizeEdit, setSizeEdit] = useState(false);
@@ -169,13 +157,6 @@ export default function Editor() {
       .catch(() => {});
   }, []);
 
-  // AI 수정 중 상태 메시지 순환
-  useEffect(() => {
-    if (!aiBusy) return;
-    setAiStep(0);
-    const t = setInterval(() => setAiStep((s) => Math.min(s + 1, AI_STEPS.length - 1)), 3500);
-    return () => clearInterval(t);
-  }, [aiBusy]);
 
   const snapshot = useCallback(() => {
     if (!fabricRef.current || restoring.current) return;
@@ -667,85 +648,98 @@ export default function Editor() {
   }
 
   // AI로 이미지의 글자를 수정/추가 — 현재 페이지를 참고해 '새 페이지'로 추가
-  async function runAiEdit() {
+  function runAiEdit() {
     const cur = natSize.current;
     // 사이즈 수정이 켜지고 값이 입력됐을 때만 크기 변경 적용
     const targetW = sizeEdit && aiW > 0 ? Math.round(aiW) : cur.w;
     const targetH = sizeEdit && aiH > 0 ? Math.round(aiH) : cur.h;
     const sizeChanged = targetW !== cur.w || targetH !== cur.h;
     if ((!aiText.trim() && !sizeChanged) || aiBusy) return;
-    setAiBusy(true);
     setAiMsg("");
-    setAiRetry("");
-    try {
-      // 현재 페이지 이미지를 참고로 업로드(디자인 유지)
-      let refUploadId: string | undefined;
-      if (bgUrl) {
-        try {
-          const blob = await (await fetch(bgUrl)).blob();
-          refUploadId = await uploadRef(new File([blob], "ref.png", { type: blob.type || "image/png" }));
-        } catch {
-          refUploadId = undefined;
-        }
-      }
-      // 요청/크기 유무에 따라 프롬프트 구성
-      let prompt = "이 참고 이미지를 바탕으로 다시 만들어줘. 원래 디자인·구도·색·내용을 최대한 그대로 유지해.";
-      if (aiText.trim()) {
-        prompt +=
-          ` 아래 요청만 반영해: "${aiText.trim()}". ` +
-          "요청은 그림에 그대로 적는 글자가 아니라 '무엇을 어떻게 바꾸거나 더할지'에 대한 지시다. 화살표(→)나 지시문 자체를 그림에 쓰지 마.";
-      }
-      if (sizeChanged) {
-        prompt += ` 이미지 크기를 ${targetW}x${targetH} 픽셀로 바꾸되, 원래 디자인과 내용을 유지하며 새 크기·비율에 자연스럽게 다시 배치해줘.`;
-      }
-      prompt += " 없는 정보는 지어내지 마.";
+    const srcUrl = bgUrl; // 지금 보고 있는 페이지를 참고로(작업 도중 페이지를 바꿔도 그대로)
+    // 요청/크기 유무에 따라 프롬프트 구성
+    let prompt = "이 참고 이미지를 바탕으로 다시 만들어줘. 원래 디자인·구도·색·내용을 최대한 그대로 유지해.";
+    if (aiText.trim()) {
+      prompt +=
+        ` 아래 요청만 반영해: "${aiText.trim()}". ` +
+        "요청은 그림에 그대로 적는 글자가 아니라 '무엇을 어떻게 바꾸거나 더할지'에 대한 지시다. 화살표(→)나 지시문 자체를 그림에 쓰지 마.";
+    }
+    if (sizeChanged) {
+      prompt += ` 이미지 크기를 ${targetW}x${targetH} 픽셀로 바꾸되, 원래 디자인과 내용을 유지하며 새 크기·비율에 자연스럽게 다시 배치해줘.`;
+    }
+    prompt += " 없는 정보는 지어내지 마.";
 
-      const r = await generateWithRetry(
-        {
-          prompt,
-          width: targetW,
-          height: targetH,
-          quality: st.quality || "medium",
-          model: st.model,
-          user_input: inputItems([
-            ["AI 수정 요청", aiText],
-            ["크기 변경", sizeChanged ? `${targetW}x${targetH}` : ""],
-          ]),
-          mode: "ai_text",
-          kind: st.kind,
-          ref_upload_id: refUploadId,
-          template_id: st.templateId,
-          similarity: 4,
-        },
-        // 안전 검사 오탐으로 다시 만드는 중 — 진행 상황을 알려 준다
-        (tryNo, total) =>
-          setAiRetry(`안전 검사에 걸려서 다시 만들고 있어요 (${tryNo}번째 시도 / 최대 ${total}번)`),
-      );
-      // 새 페이지로 추가하고 그 페이지로 이동
+    const request = aiText.trim();
+    startJob({
+      kind: "edit",
+      title: `${tplName.trim() || st.templateName || "프로젝트"} · ${request || `크기 ${targetW}×${targetH}`}`,
+      templateId: st.templateId,
+      run: async (setNote) => {
+        // 현재 페이지 이미지를 참고로 업로드(디자인 유지)
+        let refUploadId: string | undefined;
+        if (srcUrl) {
+          try {
+            const blob = await (await fetch(srcUrl)).blob();
+            refUploadId = await uploadRef(new File([blob], "ref.png", { type: blob.type || "image/png" }));
+          } catch {
+            refUploadId = undefined;
+          }
+        }
+        return generateWithRetry(
+          {
+            prompt,
+            width: targetW,
+            height: targetH,
+            quality: st.quality || "medium",
+            model: st.model,
+            user_input: inputItems([
+              ["AI 수정 요청", request],
+              ["크기 변경", sizeChanged ? `${targetW}x${targetH}` : ""],
+            ]),
+            mode: "ai_text",
+            kind: st.kind,
+            ref_upload_id: refUploadId,
+            template_id: st.templateId,
+            similarity: 4,
+          },
+          // 안전 검사 오탐으로 다시 만드는 중 — 진행 상황을 알려 준다
+          (tryNo, total) => setNote(`안전 검사에 걸려서 다시 만들고 있어요 (${tryNo}번째 시도 / 최대 ${total}번)`),
+        );
+      },
+    });
+    // 결과는 아래 감시 효과가 새 페이지로 붙인다(다른 화면에 다녀와도 동일)
+    // 화면을 벗어나지 않고 계속 편집할 수 있게 패널을 닫는다
+    setAiOpen(false);
+    setAiText("");
+    setSaveMsg("AI가 수정을 시작했어요. 끝나면 새 페이지로 붙어요. 그동안 계속 편집하셔도 돼요.");
+  }
+
+  // 이 프로젝트의 AI 작업이 끝나면 결과를 새 페이지로 붙인다(한 번만)
+  useEffect(() => {
+    for (const j of jobs) {
+      if (j.status === "running" || j.consumed || !isMine(j)) continue;
+      consume(j.id);
+      if (j.status === "error") {
+        setSaveMsg(`AI 수정에 실패했어요: ${j.error ?? errorInfo(null).message}`);
+        continue;
+      }
+      const r = j.result!;
+      if (pagesRef.current.some((p) => p.id && p.id === r.page_id)) continue; // 이미 불러온 페이지
       const next = [...pagesRef.current, { id: r.page_id ?? null, bgUrl: r.image_url, canvasJson: null }];
       pagesRef.current = next;
       setPages([...next]);
-      setDirty(true);
       setRemaining(r.remaining_krw);
-      setAiOpen(false);
-      setAiText("");
-      await showPage(next.length - 1);
-      await autoSavePages(); // 새 페이지 자동 저장
+      void (async () => {
+        await showPage(next.length - 1);
+        await autoSavePages(); // 새 페이지 자동 저장
+      })();
       setSaveMsg(
         `AI가 새 페이지를 만들었어요. 이번에 ${krw(r.cost_krw)} 썼어요` +
           (r.remaining_krw === null ? " (잔액 무제한)." : ` · 이번 달 남은 금액 ${krw(r.remaining_krw)}.`),
       );
-    } catch (e: unknown) {
-      setAiMsg(
-        isSafetyBlocked(e)
-          ? SAFETY_FAIL_MSG
-          : errorInfo(e, "AI 수정에 실패했어요. 잠시 후 다시 시도해 주세요.").message,
-      );
-    } finally {
-      setAiBusy(false);
-      setAiRetry("");
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobs]);
 
   async function doSaveTemplate(e: FormEvent) {
     e.preventDefault();
@@ -864,6 +858,7 @@ export default function Editor() {
           </button>
           <button
             onClick={() => {
+              if (aiBusy) return setPanelOpen(true); // 작업 중 — 진행 상황 보기
               setAiMsg("");
               setSizeEdit(false);
               setAiW(natSize.current.w);
@@ -871,9 +866,12 @@ export default function Editor() {
               setAiOpen(true);
             }}
             disabled={cropOn}
+            aria-busy={aiBusy}
+            title={aiBusy ? "AI가 이 프로젝트를 수정하고 있어요. 눌러서 진행 상황 보기" : undefined}
             className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
           >
-            <Icon icon="ph:magic-wand-bold" /> AI로 수정
+            <Icon icon={aiBusy ? "ph:spinner-gap-bold" : "ph:magic-wand-bold"} className={aiBusy ? "animate-spin" : ""} />
+            {aiBusy ? "AI 수정 중" : "AI로 수정"}
           </button>
           {/* 자르기 중 내려받으면 자르기 전 그림이 나가므로 잠근다 */}
           <button onClick={() => save("png")} disabled={cropOn} className={`${btn} bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-200`}>
@@ -890,10 +888,22 @@ export default function Editor() {
         </div>
       </header>
 
-      {saveMsg && (
-        <div className="bg-emerald-50 px-4 py-2 text-center text-base text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
-          {saveMsg}
+      {aiJob ? (
+        <div role="status" className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-base text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+          <Icon icon="ph:spinner-gap-bold" className="animate-spin text-[22px] text-amber-600" />
+          <span>
+            <b>이 프로젝트는 지금 AI가 수정하고 있어요</b> · {elapsedText(aiJob)} 지남
+          </span>
+          <span className="text-amber-800/80 dark:text-amber-200/80">
+            {aiJob.note || "끝나면 새 페이지로 붙어요. 계속 편집하거나 다른 화면에 다녀오셔도 돼요."}
+          </span>
         </div>
+      ) : (
+        saveMsg && (
+          <div className="bg-emerald-50 px-4 py-2 text-center text-base text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+            {saveMsg}
+          </div>
+        )
       )}
 
       <ConfirmDialog
@@ -1216,7 +1226,7 @@ export default function Editor() {
                 <Icon icon="ph:magic-wand-duotone" className="text-emerald-600 text-[24px]" />
                 AI로 수정
               </h2>
-              <button onClick={() => !aiBusy && setAiOpen(false)} disabled={aiBusy} className="grid h-9 w-9 place-items-center rounded-lg text-neutral-500 hover:bg-neutral-100 disabled:opacity-40 dark:hover:bg-neutral-800">
+              <button onClick={() => setAiOpen(false)} aria-label="AI로 수정 닫기" className="grid h-9 w-9 place-items-center rounded-lg text-neutral-500 hover:bg-neutral-100 disabled:opacity-40 dark:hover:bg-neutral-800">
                 <Icon icon="ph:x-bold" />
               </button>
             </div>
@@ -1228,33 +1238,7 @@ export default function Editor() {
               </div>
             )}
 
-            {aiBusy ? (
-              <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
-                <Icon icon="ph:spinner-gap-bold" className="animate-spin text-5xl text-emerald-500" />
-                <p className="mt-5 flex items-center gap-2 text-lg font-semibold text-emerald-700 dark:text-emerald-300">
-                  <Icon icon={AI_STEPS[Math.min(aiStep, AI_STEPS.length - 1)].icon} className="text-[22px]" />
-                  {AI_STEPS[Math.min(aiStep, AI_STEPS.length - 1)].text}
-                </p>
-                <p className="mt-2 text-base text-neutral-500 dark:text-neutral-400">30초쯤 걸려요. 잠시만 기다려 주세요.</p>
-                <div className="mt-4 flex gap-2">
-                  {AI_STEPS.map((_, i) => (
-                    <span key={i} className={`h-2.5 w-2.5 rounded-full ${i <= aiStep ? "bg-emerald-500" : "bg-neutral-200 dark:bg-neutral-700"}`} />
-                  ))}
-                </div>
-                {aiRetry && (
-                  <div className="mt-5 flex items-start gap-3 rounded-2xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-left dark:border-amber-500/50 dark:bg-amber-500/10">
-                    <Icon icon="ph:arrow-clockwise-bold" className="mt-0.5 shrink-0 animate-spin text-xl text-amber-600 dark:text-amber-400" />
-                    <div>
-                      <p className="text-base font-bold text-amber-800 dark:text-amber-200">{aiRetry}</p>
-                      <p className="mt-1 text-sm text-amber-700 dark:text-amber-300/90">
-                        AI 안전 검사가 멀쩡한 그림도 가끔 잘못 걸러요. 조건을 바꿔 다시 만드는 중이에요.
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <>
+
                 <p className="mt-1 text-base text-neutral-500 dark:text-neutral-400">
                   지금 그림을 참고해 어떻게 바꿀지 적어 주세요. 글자·색·배치 등 무엇이든 요청할 수 있어요. 결과는 <b>새 페이지</b>로 추가돼요.
                 </p>
@@ -1316,8 +1300,6 @@ export default function Editor() {
                 >
                   <Icon icon="ph:magic-wand-bold" /> AI로 수정하기
                 </button>
-              </>
-            )}
           </aside>
         )}
       </div>

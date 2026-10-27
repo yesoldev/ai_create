@@ -1,7 +1,7 @@
 // 자유도(변주)가 걸려도 '글자'는 자유롭게 생성되면 안 된다 — 프롬프트 잠금 검증.
 // 실행: PW_NO_BACKEND=1 npx playwright test e2e/text-lock.spec.ts
 import { test, expect, type Page } from "@playwright/test";
-import { OK, login, svgImage } from "./helpers";
+import { OK, login, svgImage, expectJobDone } from "./helpers";
 
 const IMG = svgImage(500, 200);
 
@@ -29,7 +29,7 @@ async function generateWith(page: Page, freedomLabel: string) {
   await page.getByRole("button", { name: "다음", exact: true }).click();
   await page.getByRole("button", { name: new RegExp(freedomLabel) }).click();
   await page.getByRole("button", { name: "만들기", exact: true }).click();
-  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
+  await expectJobDone(page);
   return sent;
 }
 

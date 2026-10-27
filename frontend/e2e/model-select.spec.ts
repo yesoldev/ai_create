@@ -1,7 +1,7 @@
 // 관리자 전용 AI 모델 선택 E2E. 백엔드 없이 돈다(모든 /api 응답 모킹).
 // 실행: PW_NO_BACKEND=1 npx playwright test e2e/model-select.spec.ts
 import { test, expect, type Page } from "@playwright/test";
-import { FAKE_PNG, OK, login } from "./helpers";
+import { FAKE_PNG, OK, login, expectJobDone } from "./helpers";
 
 /** /api/generate 요청 본문을 모아 두고 성공 응답을 준다. */
 async function captureGenerate(page: Page) {
@@ -49,7 +49,7 @@ test("관리자는 AI 모델을 고를 수 있고, 고른 모델로 생성 요�
   await finishAndGenerate(page);
   await expect(page.getByText("2.5 빠른형")).toBeVisible(); // 요약에 표시
   await page.getByRole("button", { name: "만들기", exact: true }).click();
-  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
+  await expectJobDone(page);
   expect(bodies[0]?.model).toBe("gpt-image-2.5-flare");
 });
 
@@ -59,7 +59,7 @@ test("관리자가 기본 모델을 그대로 두면 model을 보내지 않는�
   await toQualityStep(page);
   await finishAndGenerate(page);
   await page.getByRole("button", { name: "만들기", exact: true }).click();
-  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
+  await expectJobDone(page);
   expect(bodies[0]?.model).toBeUndefined();
 });
 
@@ -72,6 +72,6 @@ test("일반 사용자에겐 모델 선택이 보이지 않고 model을 보내�
   await finishAndGenerate(page);
   await expect(page.getByText("AI 모델")).toHaveCount(0);
   await page.getByRole("button", { name: "만들기", exact: true }).click();
-  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
+  await expectJobDone(page);
   expect(bodies[0]?.model).toBeUndefined();
 });

@@ -1,3 +1,4 @@
+import { expectJobDone } from "./helpers";
 import { test, expect, type Page } from "@playwright/test";
 
 const ADMIN_EMAIL = "yesol.dev@gmail.com";
@@ -66,22 +67,11 @@ test("스튜디오 마법사로 배너를 만든다 (생성 모킹)", async ({ p
   await expect(page.getByRole("heading", { name: "이대로 만들까요?" })).toBeVisible();
   await page.getByRole("button", { name: "만들기", exact: true }).click();
 
-  // 결과 화면
-  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByRole("button", { name: /PNG로 내려받기/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /JPG로 내려받기/ })).toBeVisible();
-
-  // 비슷하게 다시 만들기 → 보완 프롬프트 모달 → 참고 id + 보완 문구 전송 확인
-  const regen = page.waitForRequest((r) => {
-    if (!r.url().endsWith("/api/generate") || r.method() !== "POST") return false;
-    const b = r.postDataJSON();
-    return b?.ref_generation_id === "test-id" && String(b?.prompt).includes("더 밝게");
-  });
-  await page.getByRole("button", { name: /비슷하게 다시 만들기/ }).click();
-  await page.getByPlaceholder(/배경을 더 밝게/).fill("배경을 더 밝게");
-  await page.getByRole("button", { name: "다시 만들기", exact: true }).click();
-  await regen;
-  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
+  // 백그라운드로 넘어가고 마법사는 처음 단계로 돌아온다(그동안 또 만들 수 있게)
+  await expect(page.getByText(/만들기를 시작했어요/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "무엇을 만들까요?" })).toBeVisible();
+  // 상단 알림 바에 완성 표시
+  await expectJobDone(page);
 });
 
 test("업종 '기타' 선택 시 직접 입력칸이 뜨고 프롬프트에 반영된다", async ({ page }) => {
@@ -110,7 +100,7 @@ test("업종 '기타' 선택 시 직접 입력칸이 뜨고 프롬프트에 반�
   await expect(page.getByText("세탁소", { exact: false })).toBeVisible(); // 요약에 업종
   await page.getByRole("button", { name: "만들기", exact: true }).click();
 
-  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
+  await expectJobDone(page);
   expect(String(sent.prompt)).toContain("[업종: 세탁소]");
 });
 
@@ -147,7 +137,7 @@ test("참고할 이미지를 최근 생성물에서 고르면 ref_generation_id�
   await page.getByRole("button", { name: "다음", exact: true }).click();
   await page.getByRole("button", { name: "만들기", exact: true }).click();
 
-  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
+  await expectJobDone(page);
   expect(sent.ref_generation_id).toBe("prev1");
 });
 
@@ -178,7 +168,7 @@ test("참고할 이미지를 올리면 ref_upload_id로 생성된다", async ({ 
   await page.getByRole("button", { name: "다음", exact: true }).click();
   await page.getByRole("button", { name: "만들기", exact: true }).click();
 
-  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
+  await expectJobDone(page);
   expect(sent.ref_upload_id).toBe("up1");
 });
 
@@ -211,7 +201,7 @@ test("직접 크기(mm) 입력이 px로 환산되어 생성된다", async ({ pag
   await page.getByRole("button", { name: "다음", exact: true }).click();
   await page.getByRole("button", { name: "만들기", exact: true }).click();
 
-  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
+  await expectJobDone(page);
   // 서버로 환산된 px가 전달됐는지 확인
   expect(sentBody.width).toBe(1181);
   expect(sentBody.height).toBe(2362);
@@ -247,7 +237,7 @@ test("단계를 넘기면 화면 맨 위부터 보인다", async ({ page }) => {
   // 만들기 → 결과 화면도 맨 위부터
   await page.mouse.wheel(0, 2000);
   await page.getByRole("button", { name: "만들기", exact: true }).click();
-  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
+  await expectJobDone(page);
   expect(await page.evaluate(() => window.scrollY)).toBe(0);
 });
 
@@ -284,7 +274,7 @@ test("자유도: 고른 값에 따라 설명이 바뀌고 프롬프트 변주가
 
   // 안정적으로 = 변주 문구 없음 (작업 전과 동일한 프롬프트)
   await page.getByRole("button", { name: "만들기", exact: true }).click();
-  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
+  await expectJobDone(page);
   expect(String(sent.prompt)).not.toContain("이번 그림은");
 
   // 세션에 저장되어 새 홍보물에서도 '안정적으로'가 유지된다
@@ -296,7 +286,7 @@ test("자유도: 고른 값에 따라 설명이 바뀌고 프롬프트 변주가
   await page.getByRole("button", { name: /매번 새롭게/ }).click();
   await expect(page.getByText(/그림 그리는 방식 6가지까지/)).toBeVisible();
   await page.getByRole("button", { name: "만들기", exact: true }).click();
-  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
+  await expectJobDone(page);
   expect(String(sent.prompt)).toContain("이번 그림은");
   expect(String(sent.prompt)).toContain("그림체는");
 });
@@ -329,7 +319,7 @@ test("자유도: 참고 이미지가 있으면 선택칸이 숨고 변주도 안
   // 참고 이미지가 있으면 자유도 선택칸이 아예 없다
   await expect(page.getByText("그림 자유도")).toHaveCount(0);
   await page.getByRole("button", { name: "만들기", exact: true }).click();
-  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
+  await expectJobDone(page);
   expect(String(sent.prompt)).not.toContain("이번 그림은");
 });
 
@@ -352,6 +342,6 @@ test("바탕 색을 고르면 프롬프트에 색이 주입된다", async ({ pag
   await expect(page.getByText("전체 색감")).toBeVisible(); // 요약에 색 표시
   await page.getByRole("button", { name: "만들기", exact: true }).click();
 
-  await expect(page.getByRole("heading", { name: /완성됐어요/ })).toBeVisible({ timeout: 10_000 });
+  await expectJobDone(page);
   expect(String(sent.prompt)).toContain("파랑");
 });
