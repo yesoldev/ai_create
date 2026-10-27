@@ -3,7 +3,7 @@ import { test, expect, type Page } from "@playwright/test";
 async function login(page: Page) {
   await page.goto("/login");
   await page.getByLabel("이메일", { exact: true }).fill("yesol.dev@gmail.com");
-  await page.getByLabel("비밀번호", { exact: true }).fill("yesol1234");
+  await page.getByLabel("비밀번호", { exact: true }).fill(process.env.E2E_ADMIN_PW ?? "");
   await page.getByRole("button", { name: "로그인" }).click();
   await expect(page).toHaveURL("http://localhost:5173/", { timeout: 15_000 });
 }

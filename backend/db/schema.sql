@@ -103,6 +103,8 @@ create table if not exists public.generations (
   cost_krw       numeric(10,2) not null default 0,
   created_at     timestamptz not null default now()
 );
+-- 직원이 화면에 직접 입력한 내용(관리자 조언용) — [{label, value}, ...] 순서 유지 위해 배열
+alter table public.generations add column if not exists user_input jsonb;
 create index if not exists idx_generations_user_created on public.generations(user_id, created_at desc);
 
 -- =========================================================

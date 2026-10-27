@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@iconify/react";
+import { useAuth } from "../lib/auth";
 import {
   SIZES,
   MAX_PX,
@@ -18,6 +19,9 @@ import {
   toPx,
   fetchEstimate,
   generateWithRetry,
+  inputItems,
+  IMAGE_MODELS,
+  DEFAULT_IMAGE_MODEL,
   errorInfo,
   isSafetyBlocked,
   SAFETY_FAIL_MSG,
@@ -72,6 +76,11 @@ export default function Studio() {
   const [ch, setCh] = useState(400);
   const [unit, setUnit] = useState<Unit>("px");
   const [quality, setQuality] = useState("medium");
+  // 관리자 전용 — 이미지 모델 선택(일반 사용자에겐 안 보이고 항상 기본 모델)
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+  const [imageModel, setImageModel] = useState(DEFAULT_IMAGE_MODEL);
+  const chosenModel = isAdmin && imageModel !== DEFAULT_IMAGE_MODEL ? imageModel : undefined;
   const [freedom, setFreedomState] = useState<Freedom>(getFreedom); // 세션에 저장된 값으로 시작
   const [description, setDescription] = useState("");
   const [bizName, setBizName] = useState(""); // 업체명 — 그림에 크게 넣을 주 문구
@@ -251,6 +260,18 @@ export default function Studio() {
           ref_generation_id: refId,
           ref_upload_id: refUploadId,
           similarity: hasRef ? 2 : undefined,
+          model: chosenModel,
+          user_input: inputItems([
+            ["종류", kind === "flyer" ? "전단지" : "배너"],
+            ["업종", bizLabel],
+            ["설명", description],
+            ["업체명", bizName],
+            [isFlyer ? "전단지 문구" : "넣을 글자", isFlyer ? flyerText : textContent],
+            ["색감", color?.name],
+            ["참고 이미지", refUploadId ? "직접 올린 이미지와 비슷하게" : refId ? "이전 결과와 비슷하게" : ""],
+            ["추가 요청", extraPrompt],
+            ["제목", title],
+          ]),
         },
         // 안전 검사 오탐으로 다시 만드는 중 — 화면에 알려 준다
         (tryNo, total) => {
@@ -375,6 +396,7 @@ export default function Studio() {
                     generationId: result.generation_id,
                     templateId: result.project_id,
                     quality,
+                    model: chosenModel,
                     kind,
                     pages: [
                       { id: result.page_id, sort_order: 0, bg_url: result.image_url, canvas_json: null },
@@ -699,6 +721,33 @@ export default function Studio() {
               ))}
             </div>
 
+            {isAdmin && (
+              <div className="mt-6 rounded-2xl border-2 border-dashed border-amber-300 bg-amber-50/60 p-4 dark:border-amber-700 dark:bg-amber-950/20">
+                <p className="mb-1 flex items-center gap-2 text-lg font-semibold">
+                  <Icon icon="ph:shield-check-duotone" className="text-2xl text-amber-600" />
+                  AI 모델
+                  <span className="rounded-full bg-amber-200 px-2 py-0.5 text-sm font-bold text-amber-900 dark:bg-amber-800 dark:text-amber-100">
+                    관리자만 보여요
+                  </span>
+                </p>
+                <p className="mb-3 text-base text-neutral-600 dark:text-neutral-400">
+                  다른 직원들은 항상 기본 모델로 만들어요.
+                </p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {IMAGE_MODELS.map((m) => (
+                    <ChoiceCard
+                      key={m.key}
+                      active={imageModel === m.key}
+                      icon="ph:cpu-duotone"
+                      title={m.label}
+                      desc={m.desc}
+                      onClick={() => setImageModel(m.key)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
             <EstimateBar estimate={estimate} />
           </Section>
         )}
@@ -960,6 +1009,9 @@ export default function Studio() {
                 value={custom ? `직접 (${effW}×${effH})` : `${size!.label} (${size!.w}×${size!.h})`}
               />
               <SummaryRow label="품질" value={QUALITIES.find((q) => q.key === quality)?.label ?? quality} />
+              {isAdmin && (
+                <SummaryRow label="AI 모델" value={IMAGE_MODELS.find((m) => m.key === imageModel)?.label ?? imageModel} />
+              )}
               <SummaryRow label="설명" value={description} />
               {color && <SummaryRow label="전체 색감" value={color.name} />}
               {bizName.trim() && <SummaryRow label="업체명" value={bizName} />}

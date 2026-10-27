@@ -1,4 +1,15 @@
+import { readFileSync } from "node:fs";
 import { defineConfig, devices } from "@playwright/test";
+
+// 실계정 로그인 E2E용 비밀번호는 git에 올리지 않는다 — 루트 .env 의 E2E_* 값을 읽어 온다.
+try {
+  for (const line of readFileSync(new URL("../.env", import.meta.url), "utf8").split("\n")) {
+    const m = line.trim().match(/^(E2E_[A-Z_]+)=(.*)$/);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim();
+  }
+} catch {
+  /* .env 없으면 환경변수로 직접 넘긴다 */
+}
 
 // E2E: 백엔드(uvicorn:8000)와 프론트 개발서버(vite:5173)를 자동 기동한다.
 // vite 프록시가 /api → 8000 으로 넘긴다.

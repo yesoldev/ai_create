@@ -270,7 +270,29 @@ export interface GeneratePayload {
   ref_upload_id?: string;
   similarity?: number; // 1~4
   safety_level?: number; // 안전 검사 재시도 단계(0~2)
+  model?: string;         // 관리자 전용 — 이미지 모델 선택(없으면 기본 모델)
+  user_input?: InputItem[]; // 직원이 직접 입력한 내용 — 관리자가 보고 조언하는 용도
 }
+
+export interface InputItem {
+  label: string;
+  value: string;
+}
+
+/** 빈 값은 빼고 [{label, value}] 목록으로 — 관리자 화면에 이 순서대로 보인다 */
+export function inputItems(pairs: [string, string | null | undefined][]): InputItem[] {
+  return pairs
+    .map(([label, value]) => ({ label, value: (value ?? "").trim() }))
+    .filter((i) => i.value.length > 0);
+}
+
+// 관리자만 고를 수 있는 이미지 모델 — 백엔드 config.IMAGE_MODEL_CHOICES 와 맞춤
+export const DEFAULT_IMAGE_MODEL = "gpt-image-2";
+export const IMAGE_MODELS = [
+  { key: "gpt-image-2", label: "기본 모델", desc: "gpt-image-2" },
+  { key: "gpt-image-2.5-flare", label: "2.5 빠른형", desc: "가장 빠름 · 저렴" },
+  { key: "gpt-image-2.5-sunburst", label: "2.5 정밀형", desc: "꼼꼼함 · 저렴" },
+];
 
 // ───────── 오류 안내(전부 한글) ─────────
 // 백엔드는 AI 오류를 detail={code,message} 로 준다. 그 외(네트워크·검증 오류 등)는

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import logging
 import uuid
 
@@ -16,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from db import get_conn
 from deps import get_current_user
+from config import IMAGE_MODEL_CHOICES
 from services import cost, ledger, openai_client, sizing, storage
 
 router = APIRouter(prefix="/api", tags=["generate"])
@@ -86,6 +88,23 @@ def to_px(value: float, unit: str, dpi: int) -> int:
     raise HTTPException(400, f"알 수 없는 단위: {unit}")
 
 
+def _resolve_model(requested: str | None, user: dict) -> str:
+    """요청한 이미지 모델 확인. 기본 모델 외에는 관리자만, 허용 목록 안에서만 쓸 수 있다."""
+    if not requested or requested == openai_client.IMAGE_MODEL:
+        return openai_client.IMAGE_MODEL
+    if user.get("role") != "admin":
+        raise HTTPException(403, "AI 모델은 관리자만 바꿀 수 있습니다.")
+    if requested not in IMAGE_MODEL_CHOICES:
+        raise HTTPException(400, "선택할 수 없는 AI 모델입니다.")
+    return requested
+
+
+class InputItem(BaseModel):
+    """직원이 화면에 입력한 항목 하나(관리자 조언용 기록)."""
+    label: str = Field(max_length=30)
+    value: str = Field(max_length=3000)
+
+
 class GenerateBody(BaseModel):
     prompt: str
     width: float
@@ -100,6 +119,9 @@ class GenerateBody(BaseModel):
     template_id: str | None = None  # 있으면 새 프로젝트 대신 이 프로젝트의 이미지를 갱신
     # 안전 검사에 막혀 프론트가 다시 시도할 때 올려 보내는 단계(0=원본, 1~2=안전 조건 추가)
     safety_level: int = Field(default=0, ge=0, le=openai_client.SAFETY_MAX_LEVEL)
+    model: str | None = None      # 관리자 전용 — 이미지 모델 선택(없으면 기본 모델)
+    # 직원이 직접 입력한 내용(설명·업체명·문구 등) — 관리자 화면에서 조언용으로 본다
+    user_input: list[InputItem] | None = Field(default=None, max_length=20)
     # Phase 2 확장(수용만):
     bg_preset_id: str | None = None
     ref_generation_id: str | None = None
@@ -112,6 +134,7 @@ class GenerateBody(BaseModel):
 async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
     w = to_px(body.width, body.unit, body.dpi)
     h = to_px(body.height, body.unit, body.dpi)
+    model = _resolve_model(body.model, user)
 
     # 1) 사전 한도 체크 (실제 생성 크기 기준)
     gen_w, gen_h, _, _ = sizing.plan_size(w, h)
@@ -160,17 +183,17 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
     try:
         if ref_bytes:
             png, usage, (w, h) = await openai_client.generate_from_reference(
-                ref_bytes, prompt, w, h, body.quality, safety_level=body.safety_level
+                ref_bytes, prompt, w, h, body.quality, model=model, safety_level=body.safety_level
             )
         else:
             png, usage, (w, h) = await openai_client.generate_image(
-                prompt, w, h, body.quality, safety_level=body.safety_level
+                prompt, w, h, body.quality, model=model, safety_level=body.safety_level
             )
     except openai_client.AiError as e:
         # 원문 오류는 openai_client가 이미 로그로 남겼다. 여기선 요청 맥락만 덧붙인다.
         logger.warning(
-            "이미지 생성 실패(%s) user=%s ref=%s size=%sx%s quality=%s safety=%s",
-            e.code, user.get("id"), bool(ref_bytes), w, h, body.quality, body.safety_level,
+            "이미지 생성 실패(%s) user=%s ref=%s size=%sx%s quality=%s safety=%s model=%s",
+            e.code, user.get("id"), bool(ref_bytes), w, h, body.quality, body.safety_level, model,
         )
         raise _ai_http_error(e) from e
     except Exception as e:  # noqa: BLE001  (이미지 후처리 등 예상 밖 오류)
@@ -238,10 +261,11 @@ async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
             page_id = page["id"]
         conn.execute(
             "insert into public.generations "
-            "(id, user_id, template_id, prompt, model, quality, size, ref_image_path, result_path, cost_krw) "
-            "values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            (gid, user["id"], project_id, prompt, openai_client.IMAGE_MODEL,
-             body.quality, f"{w}x{h}", ref_path, result_path, cost_krw),
+            "(id, user_id, template_id, prompt, model, quality, size, ref_image_path, result_path, cost_krw, user_input) "
+            "values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (gid, user["id"], project_id, prompt, model,
+             body.quality, f"{w}x{h}", ref_path, result_path, cost_krw,
+             json.dumps([i.model_dump() for i in body.user_input], ensure_ascii=False) if body.user_input else None),
         )
         ledger.add_usage(conn, user["id"], cost_krw)
         remaining_after = ledger.remaining_krw(conn, user)
@@ -266,11 +290,13 @@ class InpaintBody(BaseModel):
     prompt: str
     quality: str = "medium"
     safety_level: int = Field(default=0, ge=0, le=openai_client.SAFETY_MAX_LEVEL)
+    model: str | None = None  # 관리자 전용 — 이미지 모델 선택
 
 
 @router.post("/generate/inpaint")
 async def inpaint(body: InpaintBody, user: dict = Depends(get_current_user)):
     """깨진 텍스트 부분 재생성(마스크 인페인팅)."""
+    model = _resolve_model(body.model, user)
     with get_conn() as conn:
         row = conn.execute(
             "select result_path, size from public.generations where id=%s and user_id=%s",
@@ -289,7 +315,7 @@ async def inpaint(body: InpaintBody, user: dict = Depends(get_current_user)):
 
     try:
         png, usage = await openai_client.inpaint_image(
-            src, mask, body.prompt, body.quality, safety_level=body.safety_level
+            src, mask, body.prompt, body.quality, model=model, safety_level=body.safety_level
         )
     except openai_client.AiError as e:
         logger.warning("부분 재생성 실패(%s) user=%s", e.code, user.get("id"))
@@ -308,7 +334,7 @@ async def inpaint(body: InpaintBody, user: dict = Depends(get_current_user)):
         conn.execute(
             "insert into public.generations (id, user_id, prompt, model, quality, size, result_path, cost_krw) "
             "values (%s,%s,%s,%s,%s,%s,%s,%s)",
-            (gid, user["id"], body.prompt, openai_client.IMAGE_MODEL,
+            (gid, user["id"], body.prompt, model,
              body.quality, row["size"], result_path, cost_krw),
         )
         ledger.add_usage(conn, user["id"], cost_krw)

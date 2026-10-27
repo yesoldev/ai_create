@@ -8,3 +8,6 @@ __pycache__/
 # Playwright 산출물(백엔드 폴더에서 잘못 실행된 경우)
 backend/test-results/
 backend/playwright-report/
+
+# E2E 스크린샷(디자인 리뷰용 임시 파일)
+.ui-design/shots/

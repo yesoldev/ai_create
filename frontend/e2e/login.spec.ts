@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 
 const ADMIN_EMAIL = "yesol.dev@gmail.com";
-const ADMIN_PW = "yesol1234";
+const ADMIN_PW = process.env.E2E_ADMIN_PW ?? ""; // 루트 .env (git 제외)
 
 test("올바른 계정으로 로그인하면 홈으로 이동한다", async ({ page }) => {
   await page.goto("/login");

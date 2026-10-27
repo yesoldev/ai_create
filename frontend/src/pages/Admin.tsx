@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Icon } from "@iconify/react";
 import { listUsers, createUser, patchUser, type AdminUser } from "../lib/admin";
 import { krw, fetchDefaultSizes, saveDefaultSizes } from "../lib/studio";
+import { WorkGallery } from "../components/WorkViewer";
 
 export default function Admin() {
   const nav = useNavigate();
@@ -202,6 +203,7 @@ function AddUserForm({
 function UserRow({ u, onChange, onError }: { u: AdminUser; onChange: () => Promise<void>; onError: (m: string) => void }) {
   const [limit, setLimit] = useState(u.monthly_limit_krw?.toString() ?? "");
   const [busy, setBusy] = useState(false);
+  const [showWorks, setShowWorks] = useState(false);
 
   async function act(body: Parameters<typeof patchUser>[1], ok?: string) {
     setBusy(true);
@@ -235,6 +237,13 @@ function UserRow({ u, onChange, onError }: { u: AdminUser; onChange: () => Promi
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowWorks(true)}
+            className="flex h-11 items-center gap-1.5 rounded-xl bg-emerald-50 px-4 text-base font-bold text-emerald-800 ring-2 ring-emerald-200 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-200 dark:ring-emerald-900"
+          >
+            <Icon icon="ph:images-square-duotone" className="text-[20px]" />
+            만든 것 보기
+          </button>
           <button
             disabled={busy}
             onClick={() => act({ is_active: !u.is_active }, u.is_active ? "사용을 중지했습니다." : "다시 사용하도록 했습니다.")}
@@ -276,6 +285,8 @@ function UserRow({ u, onChange, onError }: { u: AdminUser; onChange: () => Promi
           {unlimited ? "한도 다시 설정" : "무제한으로"}
         </button>
       </div>
+
+      {showWorks && <WorkGallery userId={u.id} userName={u.name || u.email} onClose={() => setShowWorks(false)} />}
     </div>
   );
 }

@@ -22,12 +22,12 @@ export const OK = (body: unknown) => ({
 });
 
 /** 로그인·홈·스튜디오·편집기가 부르는 API를 전부 모킹. */
-export async function mockBackend(page: Page) {
+export async function mockBackend(page: Page, role: "user" | "admin" = "user") {
   await page.route("**/api/**", (r) => r.fulfill(OK({ items: [] })));
   await page.route("**/api/auth/login", (r) => r.fulfill(OK({ access_token: "t", refresh_token: "r" })));
   await page.route("**/api/auth/me", (r) =>
     r.fulfill(
-      OK({ id: "u1", email: "test@test.com", name: "테스트", role: "user", monthly_limit_krw: null }),
+      OK({ id: "u1", email: "test@test.com", name: "테스트", role, monthly_limit_krw: null }),
     ),
   );
   await page.route("**/api/usage/me", (r) => r.fulfill(OK({ remaining_krw: null })));
@@ -41,8 +41,8 @@ export async function mockBackend(page: Page) {
   );
 }
 
-export async function login(page: Page) {
-  await mockBackend(page);
+export async function login(page: Page, role: "user" | "admin" = "user") {
+  await mockBackend(page, role);
   await page.goto("/login");
   await page.getByLabel("이메일", { exact: true }).fill("test@test.com");
   await page.getByLabel("비밀번호", { exact: true }).fill("pw");

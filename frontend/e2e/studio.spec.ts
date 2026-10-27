@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 
 const ADMIN_EMAIL = "yesol.dev@gmail.com";
-const ADMIN_PW = "yesol1234";
+const ADMIN_PW = process.env.E2E_ADMIN_PW ?? ""; // 루트 .env (git 제외)
 
 // 1x1 투명 PNG data URI (모킹 이미지)
 const FAKE_PNG =

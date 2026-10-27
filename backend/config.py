@@ -72,6 +72,9 @@ PRICE_CHAT_OUTPUT_PER_MTOK = 1.60
 
 # 기본 모델
 IMAGE_MODEL = "gpt-image-2"
+# 관리자만 생성 화면에서 고를 수 있는 이미지 모델(일반 사용자는 항상 IMAGE_MODEL).
+# 2.5 두 종은 gpt-image-2와 토큰 단가 동일(2026-10 공식 가격표) — 비용 계산식 그대로 사용.
+IMAGE_MODEL_CHOICES = ("gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst")
 IMAGE_MODEL_CHEAP = "gpt-image-1-mini"
 TEXT_MODEL = "gpt-4.1-mini"  # 카피라이팅용
 
