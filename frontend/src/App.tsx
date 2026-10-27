@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-route
 import { AuthProvider, useAuth } from "./lib/auth";
 import { JobsProvider } from "./lib/jobs";
 import JobsUI from "./components/JobsUI";
+import UpdateNotice from "./components/UpdateNotice";
 import Login from "./pages/Login";
 import Studio from "./pages/Studio";
 import Home from "./pages/Home";
@@ -47,6 +48,7 @@ export default function App() {
     <AuthProvider>
       <JobsProvider>
       <BrowserRouter>
+        <UpdateNotice />
         <JobsLayer />
         <Routes>
           <Route path="/login" element={<LoginRoute />} />

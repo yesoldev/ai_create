@@ -44,9 +44,14 @@ async def health():
 if FRONTEND_DIST.exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
 
+    # index.html은 늘 새로 확인하게 한다(no-cache = 매번 서버에 물어보고 안 바뀌었으면 304).
+    # 지정이 없으면 브라우저가 예전 index.html을 재사용해, 배포 후 새로고침해도 예전 화면이 뜰 수 있다.
+    # (assets/ 파일은 이름에 해시가 붙어 바뀌면 이름이 달라지므로 그대로 둔다)
+    _NO_CACHE = {"Cache-Control": "no-cache"}
+
     @app.get("/{full_path:path}")
     async def spa(full_path: str):
         candidate = FRONTEND_DIST / full_path
-        if candidate.is_file():
+        if candidate.is_file() and candidate.name != "index.html":
             return FileResponse(candidate)
-        return FileResponse(FRONTEND_DIST / "index.html")
+        return FileResponse(FRONTEND_DIST / "index.html", headers=_NO_CACHE)
