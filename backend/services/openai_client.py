@@ -25,7 +25,7 @@ from config import (
     TEXT_MODEL,
     settings,
 )
-from services.sizing import plan_size
+from services.sizing import crop_edge_ratio, plan_size
 
 client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 logger = logging.getLogger("openai_client")
@@ -63,6 +63,21 @@ SAFETY_GUARDS: tuple[str, ...] = (
     "구성된 건전한 상업 광고 이미지로 만든다.",
 )
 SAFETY_MAX_LEVEL = len(SAFETY_GUARDS) - 1
+
+
+def with_crop_hint(prompt: str, gen_w: int, gen_h: int, fin_w: int, fin_h: int) -> str:
+    """3:1보다 긴 요청은 생성 후 가장자리를 자르므로, 글자가 잘리지 않게 배치 조건을 덧붙인다."""
+    side, edge = crop_edge_ratio(gen_w, gen_h, fin_w, fin_h)
+    if not side:
+        return prompt
+    pct = max(1, round(edge * 100))
+    where = "위쪽과 아래쪽" if side == "vertical" else "왼쪽과 오른쪽"
+    band = "가로" if side == "vertical" else "세로"
+    return prompt + (
+        f"\n\n[배치 조건] 완성 후 {where} 가장자리가 각각 약 {pct}%씩 잘려나간다. "
+        f"글자·로고·제품 등 중요한 요소는 모두 가운데 {band} 띠 안에만 배치하고, "
+        f"{where} 가장자리에는 배경만 이어지게 그린다."
+    )
 
 
 def with_guard(prompt: str, safety_level: int = 0) -> str:
@@ -163,7 +178,15 @@ def snap_size(width: int, height: int) -> tuple[int, int, bool]:
 
 
 def _resize_png(png: bytes, w: int, h: int) -> bytes:
+    """요청 크기로 맞춘다. 비율이 다르면(3:1 초과 요청) 가운데를 잘라 비율을 맞춘 뒤 축소."""
     img = Image.open(io.BytesIO(png)).convert("RGBA")
+    side, edge = crop_edge_ratio(img.width, img.height, w, h)
+    if side == "vertical":
+        cut = round(img.height * edge)
+        img = img.crop((0, cut, img.width, img.height - cut))
+    elif side == "horizontal":
+        cut = round(img.width * edge)
+        img = img.crop((cut, 0, img.width - cut, img.height))
     img = img.resize((w, h), Image.LANCZOS)
     out = io.BytesIO()
     img.save(out, format="PNG")
@@ -188,7 +211,7 @@ async def generate_image(
         "생성",
         lambda: client.images.generate(
             model=model or IMAGE_MODEL,
-            prompt=with_guard(prompt, safety_level),
+            prompt=with_guard(with_crop_hint(prompt, gen_w, gen_h, fin_w, fin_h), safety_level),
             size=f"{gen_w}x{gen_h}",
             quality=quality,
             n=1,
@@ -235,7 +258,7 @@ async def generate_from_reference(
         lambda: client.images.edit(
             model=model or IMAGE_MODEL,
             image=buf,
-            prompt=with_guard(prompt, safety_level),
+            prompt=with_guard(with_crop_hint(prompt, gen_w, gen_h, fin_w, fin_h), safety_level),
             size=f"{gen_w}x{gen_h}",
             quality=quality,  # 구 SDK에선 edit에 못 넘겼다(openai 3.x부터 가능)
             n=1,
