@@ -1,8 +1,8 @@
 import { useEffect, useState, type FormEvent, type ChangeEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@iconify/react";
-import { listUsers, createUser, patchUser, type AdminUser } from "../lib/admin";
-import { krw, fetchDefaultSizes, saveDefaultSizes } from "../lib/studio";
+import { listUsers, createUser, patchUser, getImageModel, setImageModel, type AdminUser } from "../lib/admin";
+import { krw, fetchDefaultSizes, saveDefaultSizes, IMAGE_MODELS } from "../lib/studio";
 import { WorkGallery } from "../components/WorkViewer";
 
 export default function Admin() {
@@ -66,6 +66,7 @@ export default function Admin() {
           />
         )}
 
+        <ImageModelCard onError={setMsg} onOk={setMsg} />
         <DefaultSizesCard onError={setMsg} onOk={setMsg} />
 
         <h2 className="mt-8 mb-3 text-xl font-bold">계정 목록</h2>
@@ -76,6 +77,88 @@ export default function Admin() {
         </div>
       </main>
     </div>
+  );
+}
+
+function ImageModelCard({ onError, onOk }: { onError: (m: string) => void; onOk: (m: string) => void }) {
+  const [saved, setSaved] = useState<string | null>(null); // 지금 쓰는 모델
+  const [pick, setPick] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    getImageModel()
+      .then((d) => {
+        setSaved(d.model);
+        setPick(d.model);
+      })
+      .catch(() => onError("AI 모델 설정을 불러오지 못했습니다."));
+  }, [onError]);
+
+  async function save() {
+    if (!pick) return;
+    setBusy(true);
+    try {
+      await setImageModel(pick);
+      setSaved(pick);
+      const label = IMAGE_MODELS.find((m) => m.key === pick)?.label ?? pick;
+      onOk(`AI 모델을 '${label}'(으)로 바꿨습니다. 지금부터 모든 직원의 그림 만들기에 적용돼요.`);
+    } catch {
+      onError("AI 모델 저장에 실패했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="mt-8 rounded-2xl border-2 border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
+      <h2 className="flex items-center gap-2 text-xl font-bold">
+        <Icon icon="ph:cpu-duotone" className="text-emerald-600 text-[24px]" />
+        AI 그림 모델
+      </h2>
+      <p className="mt-1 text-base text-neutral-500 dark:text-neutral-400">
+        여기서 고른 모델로 모든 직원이 그림을 만들어요. (새 홍보물·AI로 수정 모두)
+      </p>
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        {IMAGE_MODELS.map((m) => {
+          const active = pick === m.key;
+          return (
+            <button
+              key={m.key}
+              type="button"
+              onClick={() => setPick(m.key)}
+              aria-pressed={active}
+              disabled={pick === null}
+              className={`relative flex flex-col items-start gap-1 rounded-2xl border-2 p-4 text-left transition disabled:opacity-50 ${
+                active
+                  ? "border-emerald-500 bg-emerald-50 ring-4 ring-emerald-500/15 dark:bg-emerald-950/30"
+                  : "border-neutral-200 hover:border-emerald-300 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              }`}
+            >
+              {saved === m.key && (
+                <span className="absolute right-3 top-3 rounded-full bg-emerald-600 px-2 py-0.5 text-sm font-bold text-white">사용 중</span>
+              )}
+              <span className="flex items-center gap-2 text-lg font-bold">
+                <Icon icon={active ? "ph:radio-button-fill" : "ph:circle-bold"} className={active ? "text-emerald-600" : "text-neutral-400"} />
+                {m.label}
+              </span>
+              <span className="text-base text-neutral-500 dark:text-neutral-400">{m.desc}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-4 flex items-center gap-3">
+        <button
+          onClick={save}
+          disabled={busy || !pick || pick === saved}
+          className="flex h-11 items-center gap-2 rounded-xl bg-emerald-600 px-5 text-base font-bold text-white hover:bg-emerald-500 disabled:opacity-50"
+        >
+          <Icon icon="ph:check-bold" /> {busy ? "저장 중..." : "이 모델로 바꾸기"}
+        </button>
+        {pick && saved && pick !== saved && (
+          <span className="text-base text-amber-700 dark:text-amber-300">아직 저장하지 않았어요</span>
+        )}
+      </div>
+    </section>
   );
 }
 

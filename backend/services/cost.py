@@ -9,6 +9,7 @@ import math
 
 from config import (
     ESTIMATE_USD_1024,
+    ESTIMATE_USD_1024_BY_MODEL,
     PRICE_CHAT_INPUT_PER_MTOK,
     PRICE_CHAT_OUTPUT_PER_MTOK,
     PRICE_IMAGE_INPUT_PER_MTOK,
@@ -20,9 +21,10 @@ from config import (
 _AREA_1024 = 1024 * 1024
 
 
-def estimate_cost_krw(width: int, height: int, quality: str) -> float:
-    """생성 전 예상 비용(KRW). 앵커(1024²) 대비 면적 비례로 근사."""
-    base_usd = ESTIMATE_USD_1024.get(quality, ESTIMATE_USD_1024["medium"])
+def estimate_cost_krw(width: int, height: int, quality: str, model: str | None = None) -> float:
+    """생성 전 예상 비용(KRW). 모델별 앵커(1024²) 대비 면적 비례로 근사."""
+    anchors = ESTIMATE_USD_1024_BY_MODEL.get(model or "", ESTIMATE_USD_1024)
+    base_usd = anchors.get(quality, anchors["medium"])
     area_ratio = (width * height) / _AREA_1024
     usd = base_usd * area_ratio
     return round(usd * settings.USD_KRW_RATE, 2)
@@ -61,14 +63,16 @@ def copy_cost_krw(usage: dict | None) -> float:
     return round(usd * settings.USD_KRW_RATE, 2)
 
 
-def remaining_images(remaining_krw: float | None, width: int, height: int, quality: str) -> int | None:
+def remaining_images(
+    remaining_krw: float | None, width: int, height: int, quality: str, model: str | None = None
+) -> int | None:
     """잔여 한도로 해당 품질/사이즈 이미지를 앞으로 몇 장 만들 수 있는지.
 
     한도 무제한(None)이면 None 반환.
     """
     if remaining_krw is None:
         return None
-    per = estimate_cost_krw(width, height, quality)
+    per = estimate_cost_krw(width, height, quality, model)
     if per <= 0:
         return None
     return max(0, math.floor(remaining_krw / per))

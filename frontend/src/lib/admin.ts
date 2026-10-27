@@ -36,6 +36,15 @@ export async function patchUser(
   await api.patch(`/api/admin/users/${id}`, body);
 }
 
+// ───────── 이미지 모델(모든 직원의 생성에 적용) ─────────
+export async function getImageModel(): Promise<{ model: string; default: string; choices: string[] }> {
+  return (await api.get("/api/settings/image-model")).data;
+}
+
+export async function setImageModel(model: string): Promise<void> {
+  await api.patch("/api/settings/image-model", { model });
+}
+
 // ───────── 직원 작업 보기(관리자 조언용) ─────────
 export interface InputItem {
   label: string;

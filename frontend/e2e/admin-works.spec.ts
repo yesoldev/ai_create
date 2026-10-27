@@ -9,6 +9,9 @@ test("관리자는 직원이 만든 그림과 입력한 내용을 팝업으로 �
   await expect(page).toHaveURL("http://localhost:5173/", { timeout: 15_000 });
   await page.getByRole("button", { name: /관리자/ }).click();
   await expect(page.getByRole("heading", { name: "계정 관리" })).toBeVisible();
+  // 실제 서버의 AI 모델 설정을 읽어 '사용 중'을 표시한다(조회만)
+  const modelCard = page.locator("section", { has: page.getByRole("heading", { name: "AI 그림 모델" }) });
+  await expect(modelCard.getByText("사용 중")).toHaveCount(1, { timeout: 15_000 });
 
   // 신미영님 행의 '만든 것 보기'
   const row = page.locator("div.rounded-2xl", { hasText: "tlsaldud7195@naver.com" }).first();
@@ -24,7 +27,8 @@ test("관리자는 직원이 만든 그림과 입력한 내용을 팝업으로 �
   // 한 장 열기 → 직원 입력 + 설정 + 전체 문장
   await cards.first().getByRole("button").click();
   const detail = page.getByRole("dialog", { name: "홍보물 자세히 보기" });
-  await expect(detail.getByRole("heading", { name: "직원이 입력한 내용" })).toBeVisible();
+  // 원본 그림 서명 주소를 Supabase에서 받아 오느라 늦을 때가 있다
+  await expect(detail.getByRole("heading", { name: "직원이 입력한 내용" })).toBeVisible({ timeout: 15_000 });
   await expect(detail.locator("dl dt").first()).toBeVisible({ timeout: 15_000 });
   await expect(detail.getByText(/^품질 /)).toBeVisible();
   await expect(detail.locator("img")).toBeVisible({ timeout: 15_000 });

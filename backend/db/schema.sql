@@ -31,6 +31,9 @@ create table if not exists public.users (
 -- =========================================================
 -- folders : 템플릿 트리(카테고리 > 업체명 > ...)
 -- =========================================================
+-- 계정별로 마지막에 고른 크기(배너·전단지 따로) — {banner?: {mode, preset_key, custom:{w,h,unit}}, flyer?: ...}
+alter table public.users add column if not exists size_prefs jsonb;
+
 create table if not exists public.folders (
   id         uuid primary key default gen_random_uuid(),
   parent_id  uuid references public.folders(id) on delete cascade,

@@ -270,7 +270,7 @@ export interface GeneratePayload {
   ref_upload_id?: string;
   similarity?: number; // 1~4
   safety_level?: number; // 안전 검사 재시도 단계(0~2)
-  model?: string;         // 관리자 전용 — 이미지 모델 선택(없으면 기본 모델)
+  size_choice?: SizeChoice; // 스튜디오에서 고른 크기 — 계정별로 기억해 다음에 그대로 골라 둔다
   user_input?: InputItem[]; // 직원이 직접 입력한 내용 — 관리자가 보고 조언하는 용도
 }
 
@@ -286,13 +286,34 @@ export function inputItems(pairs: [string, string | null | undefined][]): InputI
     .filter((i) => i.value.length > 0);
 }
 
-// 관리자만 고를 수 있는 이미지 모델 — 백엔드 config.IMAGE_MODEL_CHOICES 와 맞춤
-export const DEFAULT_IMAGE_MODEL = "gpt-image-2";
+// 이미지 모델 — 관리자 화면에서 골라 모든 직원에게 적용. 백엔드 config.IMAGE_MODEL_CHOICES 와 맞춤
+// (비교 실측 2026-10-27, 1024×1536 보통 한 장: 2 → 31초·59원 / 2.5 → 15~18초·15원, 한글 정확도 동일)
 export const IMAGE_MODELS = [
-  { key: "gpt-image-2", label: "기본 모델", desc: "gpt-image-2" },
-  { key: "gpt-image-2.5-flare", label: "2.5 빠른형", desc: "가장 빠름 · 저렴" },
-  { key: "gpt-image-2.5-sunburst", label: "2.5 정밀형", desc: "꼼꼼함 · 저렴" },
+  { key: "gpt-image-2", label: "gpt-image-2", desc: "지금까지 쓰던 모델 · 한 장 약 30초" },
+  { key: "gpt-image-2.5-flare", label: "2.5 빠른형", desc: "가장 빠름(약 15초) · 비용 약 1/4" },
+  { key: "gpt-image-2.5-sunburst", label: "2.5 정밀형", desc: "정리가 꼼꼼함(약 18초) · 비용 약 1/4" },
 ];
+
+// ───────── 계정별로 마지막에 고른 크기(배너·전단지 따로) ─────────
+export interface SizeChoice {
+  kind: "banner" | "flyer";
+  mode: "preset" | "custom";
+  preset_key?: string;
+  custom_w: number;
+  custom_h: number;
+  custom_unit: Unit;
+}
+export interface SizePref {
+  mode: "preset" | "custom";
+  preset_key: string | null;
+  custom: { w: number; h: number; unit: Unit };
+}
+export type SizePrefs = Partial<Record<"banner" | "flyer", SizePref>>;
+
+export async function fetchMySizes(): Promise<SizePrefs> {
+  const { data } = await api.get<SizePrefs>("/api/settings/my-sizes");
+  return data ?? {};
+}
 
 // ───────── 오류 안내(전부 한글) ─────────
 // 백엔드는 AI 오류를 detail={code,message} 로 준다. 그 외(네트워크·검증 오류 등)는

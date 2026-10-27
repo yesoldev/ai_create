@@ -22,7 +22,8 @@ test("틀린 비밀번호는 오류 메시지를 보여준다", async ({ page })
   await page.getByLabel("비밀번호", { exact: true }).fill("wrong-password");
   await page.getByRole("button", { name: "로그인" }).click();
 
-  await expect(page.getByRole("alert")).toContainText("올바르지 않습니다");
+  // 실제 Supabase 로그인을 거치므로 응답이 늦을 때가 있다
+  await expect(page.getByRole("alert")).toContainText("올바르지 않습니다", { timeout: 15_000 });
   await expect(page).toHaveURL(/\/login$/);
 });
 

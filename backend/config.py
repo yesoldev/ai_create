@@ -72,8 +72,8 @@ PRICE_CHAT_OUTPUT_PER_MTOK = 1.60
 
 # 기본 모델
 IMAGE_MODEL = "gpt-image-2"
-# 관리자만 생성 화면에서 고를 수 있는 이미지 모델(일반 사용자는 항상 IMAGE_MODEL).
-# 2.5 두 종은 gpt-image-2와 토큰 단가 동일(2026-10 공식 가격표) — 비용 계산식 그대로 사용.
+# 관리자 화면에서 고를 수 있는 이미지 모델(모든 직원의 생성에 적용, services/app_settings).
+# 2.5 두 종은 gpt-image-2와 토큰 단가 동일(2026-10 공식 가격표) — 실제 청구 계산식 그대로 사용.
 IMAGE_MODEL_CHOICES = ("gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst")
 IMAGE_MODEL_CHEAP = "gpt-image-1-mini"
 TEXT_MODEL = "gpt-4.1-mini"  # 카피라이팅용
@@ -81,6 +81,13 @@ TEXT_MODEL = "gpt-4.1-mini"  # 카피라이팅용
 # 사전 예상비용 앵커 (1024×1024, USD) — "앞으로 N장" 미리보기 계산용.
 # 실제 청구는 응답 usage 토큰으로 재계산한다. (계획서 §2 참고값)
 ESTIMATE_USD_1024 = {"low": 0.006, "medium": 0.05, "high": 0.21}
+# 2.5는 같은 그림에 출력 토큰을 훨씬 적게 쓴다(2026-10-27 실측 1024x1536 보통: 2 → 1372토큰, 2.5 → 343토큰).
+# 앵커는 외부 실측(Segmind, 1024² 기준)을 보수적으로 사용.
+ESTIMATE_USD_1024_BY_MODEL = {
+    "gpt-image-2": ESTIMATE_USD_1024,
+    "gpt-image-2.5-flare": {"low": 0.008, "medium": 0.017, "high": 0.067},
+    "gpt-image-2.5-sunburst": {"low": 0.008, "medium": 0.017, "high": 0.067},
+}
 
 # 사이즈 제약
 SIZE_SNAP = 16          # 요청 px을 16의 배수로 스냅

@@ -10,6 +10,7 @@ import base64
 import json
 import logging
 import uuid
+from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -17,8 +18,7 @@ from pydantic import BaseModel, Field
 
 from db import get_conn
 from deps import get_current_user
-from config import IMAGE_MODEL_CHOICES
-from services import cost, ledger, openai_client, sizing, storage
+from services import app_settings, cost, ledger, openai_client, sizing, storage
 
 router = APIRouter(prefix="/api", tags=["generate"])
 logger = logging.getLogger("generate")
@@ -88,15 +88,27 @@ def to_px(value: float, unit: str, dpi: int) -> int:
     raise HTTPException(400, f"알 수 없는 단위: {unit}")
 
 
-def _resolve_model(requested: str | None, user: dict) -> str:
-    """요청한 이미지 모델 확인. 기본 모델 외에는 관리자만, 허용 목록 안에서만 쓸 수 있다."""
-    if not requested or requested == openai_client.IMAGE_MODEL:
-        return openai_client.IMAGE_MODEL
-    if user.get("role") != "admin":
-        raise HTTPException(403, "AI 모델은 관리자만 바꿀 수 있습니다.")
-    if requested not in IMAGE_MODEL_CHOICES:
-        raise HTTPException(400, "선택할 수 없는 AI 모델입니다.")
-    return requested
+class SizeChoice(BaseModel):
+    """스튜디오에서 고른 크기 — 계정별로 기억해 다음 생성 때 그대로 골라 둔다(배너·전단지 따로)."""
+    kind: Literal["banner", "flyer"]
+    mode: Literal["preset", "custom"]
+    preset_key: str | None = Field(default=None, max_length=40)
+    custom_w: float = Field(gt=0, le=100_000)
+    custom_h: float = Field(gt=0, le=100_000)
+    custom_unit: Literal["px", "mm", "cm"] = "px"
+
+
+def _remember_size(conn, user_id: str, c: SizeChoice) -> None:
+    pref = {
+        "mode": c.mode,
+        "preset_key": c.preset_key,
+        "custom": {"w": c.custom_w, "h": c.custom_h, "unit": c.custom_unit},
+    }
+    conn.execute(
+        "update public.users set size_prefs = coalesce(size_prefs, '{}'::jsonb) || jsonb_build_object(%s::text, %s::jsonb) "
+        "where id=%s",
+        (c.kind, json.dumps(pref), user_id),
+    )
 
 
 class InputItem(BaseModel):
@@ -119,7 +131,7 @@ class GenerateBody(BaseModel):
     template_id: str | None = None  # 있으면 새 프로젝트 대신 이 프로젝트의 이미지를 갱신
     # 안전 검사에 막혀 프론트가 다시 시도할 때 올려 보내는 단계(0=원본, 1~2=안전 조건 추가)
     safety_level: int = Field(default=0, ge=0, le=openai_client.SAFETY_MAX_LEVEL)
-    model: str | None = None      # 관리자 전용 — 이미지 모델 선택(없으면 기본 모델)
+    size_choice: SizeChoice | None = None  # 스튜디오에서 고른 크기(계정별 기억용)
     # 직원이 직접 입력한 내용(설명·업체명·문구 등) — 관리자 화면에서 조언용으로 본다
     user_input: list[InputItem] | None = Field(default=None, max_length=20)
     # Phase 2 확장(수용만):
@@ -134,13 +146,16 @@ class GenerateBody(BaseModel):
 async def generate(body: GenerateBody, user: dict = Depends(get_current_user)):
     w = to_px(body.width, body.unit, body.dpi)
     h = to_px(body.height, body.unit, body.dpi)
-    model = _resolve_model(body.model, user)
+    model = app_settings.image_model()  # 관리자 화면에서 정한 모델(모든 직원 공통)
+    if body.size_choice:
+        with get_conn() as conn:
+            _remember_size(conn, user["id"], body.size_choice)
 
     # 1) 사전 한도 체크 (실제 생성 크기 기준)
     gen_w, gen_h, _, _ = sizing.plan_size(w, h)
     with get_conn() as conn:
         remaining = ledger.remaining_krw(conn, user)
-    est = cost.estimate_cost_krw(gen_w, gen_h, body.quality)
+    est = cost.estimate_cost_krw(gen_w, gen_h, body.quality, model)
     if body.ref_generation_id or body.ref_upload_id:
         est *= 2  # 참고 이미지 입력 토큰(high fidelity 과금) 대략 반영
     if remaining is not None and est > remaining:
@@ -290,13 +305,12 @@ class InpaintBody(BaseModel):
     prompt: str
     quality: str = "medium"
     safety_level: int = Field(default=0, ge=0, le=openai_client.SAFETY_MAX_LEVEL)
-    model: str | None = None  # 관리자 전용 — 이미지 모델 선택
 
 
 @router.post("/generate/inpaint")
 async def inpaint(body: InpaintBody, user: dict = Depends(get_current_user)):
     """깨진 텍스트 부분 재생성(마스크 인페인팅)."""
-    model = _resolve_model(body.model, user)
+    model = app_settings.image_model()
     with get_conn() as conn:
         row = conn.execute(
             "select result_path, size from public.generations where id=%s and user_id=%s",

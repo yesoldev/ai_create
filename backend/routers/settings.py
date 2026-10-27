@@ -1,29 +1,22 @@
-"""앱 설정 — 배너/전단지 기본 사이즈(관리자 설정). presets 테이블에 저장(마이그레이션 불필요)."""
+"""앱 설정 — 배너/전단지 기본 사이즈·이미지 모델(관리자 설정), 계정별로 마지막에 고른 크기."""
 from __future__ import annotations
 
-import json
-
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from config import IMAGE_MODEL, IMAGE_MODEL_CHOICES
 from db import get_conn
 from deps import get_current_user, require_admin
+from services import app_settings
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 # 관리자가 설정 안 했을 때의 기본값
 _FALLBACK = {"banner": {"w": 1024, "h": 400}, "flyer": {"w": 900, "h": 1500}}
-_PRESET_TYPE = "style"
-_PRESET_NAME = "default_sizes"
 
 
 def _read() -> dict:
-    with get_conn() as conn:
-        row = conn.execute(
-            "select payload from public.presets where type=%s and name=%s limit 1",
-            (_PRESET_TYPE, _PRESET_NAME),
-        ).fetchone()
-    p = row["payload"] if row else None
+    p = app_settings.read("default_sizes")
     out = {k: dict(v) for k, v in _FALLBACK.items()}
     if isinstance(p, dict):
         for k in ("banner", "flyer"):
@@ -51,19 +44,34 @@ async def set_default_sizes(body: SizesBody, admin: dict = Depends(require_admin
         "banner": {"w": body.banner_w, "h": body.banner_h},
         "flyer": {"w": body.flyer_w, "h": body.flyer_h},
     }
-    with get_conn() as conn:
-        row = conn.execute(
-            "select id from public.presets where type=%s and name=%s limit 1",
-            (_PRESET_TYPE, _PRESET_NAME),
-        ).fetchone()
-        if row:
-            conn.execute(
-                "update public.presets set payload=%s where id=%s",
-                (json.dumps(payload), row["id"]),
-            )
-        else:
-            conn.execute(
-                "insert into public.presets (type, name, payload) values (%s,%s,%s)",
-                (_PRESET_TYPE, _PRESET_NAME, json.dumps(payload)),
-            )
+    app_settings.write("default_sizes", payload)
     return payload
+
+
+# ───────── 이미지 모델(관리자) — 모든 직원의 생성에 적용 ─────────
+@router.get("/image-model")
+async def get_image_model(admin: dict = Depends(require_admin)):
+    return {"model": app_settings.image_model(), "default": IMAGE_MODEL, "choices": list(IMAGE_MODEL_CHOICES)}
+
+
+class ModelBody(BaseModel):
+    model: str
+
+
+@router.patch("/image-model")
+async def set_image_model(body: ModelBody, admin: dict = Depends(require_admin)):
+    try:
+        model = app_settings.set_image_model(body.model)
+    except ValueError:
+        raise HTTPException(400, "선택할 수 없는 AI 모델입니다.") from None
+    return {"model": model}
+
+
+# ───────── 계정별로 마지막에 고른 크기(배너·전단지 따로) ─────────
+@router.get("/my-sizes")
+async def get_my_sizes(user: dict = Depends(get_current_user)):
+    """{banner?: {mode, preset_key?, custom:{w,h,unit}}, flyer?: ...} — 스튜디오가 다음 생성 때 미리 골라 둔다."""
+    with get_conn() as conn:
+        row = conn.execute("select size_prefs from public.users where id=%s", (user["id"],)).fetchone()
+    p = row["size_prefs"] if row else None
+    return p if isinstance(p, dict) else {}

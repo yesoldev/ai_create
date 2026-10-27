@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@iconify/react";
-import { useAuth } from "../lib/auth";
 import { useJobs } from "../lib/jobs";
 import {
   SIZES,
@@ -21,8 +20,7 @@ import {
   fetchEstimate,
   generateWithRetry,
   inputItems,
-  IMAGE_MODELS,
-  DEFAULT_IMAGE_MODEL,
+  fetchMySizes,
   uploadRef,
   copywrite,
   krw,
@@ -30,6 +28,8 @@ import {
   pushRecentPrompt,
   listGenerations,
   type Estimate,
+  type SizePrefs,
+  type SizeChoice,
   type SizePreset,
   type Unit,
   type BizType,
@@ -61,11 +61,6 @@ export default function Studio() {
   const [ch, setCh] = useState(400);
   const [unit, setUnit] = useState<Unit>("px");
   const [quality, setQuality] = useState("medium");
-  // 관리자 전용 — 이미지 모델 선택(일반 사용자에겐 안 보이고 항상 기본 모델)
-  const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
-  const [imageModel, setImageModel] = useState(DEFAULT_IMAGE_MODEL);
-  const chosenModel = isAdmin && imageModel !== DEFAULT_IMAGE_MODEL ? imageModel : undefined;
   const [freedom, setFreedomState] = useState<Freedom>(getFreedom); // 세션에 저장된 값으로 시작
   const [description, setDescription] = useState("");
   const [bizName, setBizName] = useState(""); // 업체명 — 그림에 크게 넣을 주 문구
@@ -82,6 +77,9 @@ export default function Studio() {
   const [recentGens, setRecentGens] = useState<RecentGen[]>([]);
   const [showRefPicker, setShowRefPicker] = useState(false);
   const [showRecentPrompts, setShowRecentPrompts] = useState(false);
+
+  // 이 계정이 마지막에 고른 크기(배너·전단지 따로) — 종류를 고르면 그대로 골라 둔다
+  const [sizePrefs, setSizePrefs] = useState<SizePrefs>({});
 
   // 관리자 설정 기본 사이즈 → 종류별 첫 번째(추천) 옵션으로
   const [adminSizes, setAdminSizes] = useState<{ banner: { w: number; h: number }; flyer: { w: number; h: number } } | null>(null);
@@ -100,6 +98,9 @@ export default function Studio() {
     fetchDefaultSizes()
       .then(setAdminSizes)
       .catch(() => setAdminSizes(null));
+    fetchMySizes()
+      .then(setSizePrefs)
+      .catch(() => setSizePrefs({}));
   }, []);
 
   const [copyMsg, setCopyMsg] = useState("");
@@ -158,8 +159,19 @@ export default function Studio() {
 
   function pickKind(k: Kind) {
     setKind(k);
-    setSize(sizeOptions(k)[0]);
-    setCustom(false);
+    const opts = sizeOptions(k);
+    const pref = sizePrefs[k];
+    // 직접 입력칸: 지난번 이 종류에서 입력한 값(없으면 추천 크기)
+    setCw(pref?.custom.w ?? opts[0].w);
+    setCh(pref?.custom.h ?? opts[0].h);
+    setUnit(pref?.custom.unit ?? "px");
+    if (pref?.mode === "custom") {
+      setCustom(true);
+      setSize(opts[0]);
+    } else {
+      setCustom(false);
+      setSize(opts.find((o) => o.key === pref?.preset_key) ?? opts[0]);
+    }
     setStep(2);
   }
 
@@ -187,6 +199,27 @@ export default function Studio() {
     const fullPrompt = `${bizLabel ? `[업종: ${bizLabel}] ` : ""}${description}.${colorHint} ${hint}${varied}`;
     pushRecentPrompt(description); // 다음에 재사용할 수 있게 저장
     const jobTitle = title.trim() || bizName.trim() || description.trim().slice(0, 24) || "새 홍보물";
+    // 고른 크기를 계정에 기억(서버) + 바로 이어 만들 때를 위해 화면에도 반영
+    const sizeChoice: SizeChoice | undefined = kind
+      ? {
+          kind,
+          mode: custom ? "custom" : "preset",
+          preset_key: custom ? undefined : size?.key,
+          custom_w: cw,
+          custom_h: ch,
+          custom_unit: unit,
+        }
+      : undefined;
+    if (sizeChoice) {
+      setSizePrefs((prev) => ({
+        ...prev,
+        [sizeChoice.kind]: {
+          mode: sizeChoice.mode,
+          preset_key: sizeChoice.preset_key ?? null,
+          custom: { w: cw, h: ch, unit },
+        },
+      }));
+    }
     const payload = {
       prompt: fullPrompt,
       width: effW,
@@ -199,7 +232,7 @@ export default function Studio() {
       kind: kind || undefined,
       ref_generation_id: refId,
       similarity: hasRef ? 2 : undefined,
-      model: chosenModel,
+      size_choice: sizeChoice,
       user_input: inputItems([
         ["종류", isFlyer ? "전단지" : "배너"],
         ["업종", bizLabel],
@@ -329,7 +362,15 @@ export default function Studio() {
 
         {step === 3 && kind && (
           <Section title="크기와 품질을 골라요" desc="잘 모르면 추천된 것을 그대로 두세요.">
-            <p className="mb-2 text-lg font-semibold">크기</p>
+            <p className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-lg font-semibold">
+              크기
+              {sizePrefs[kind] && (
+                <span className="flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-base font-medium text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+                  <Icon icon="ph:clock-counter-clockwise-bold" />
+                  지난번에 만든 크기로 골라 뒀어요
+                </span>
+              )}
+            </p>
             <div className="grid gap-3 sm:grid-cols-2">
               {sizeOptions(kind).map((s) => (
                 <ChoiceCard
@@ -417,33 +458,6 @@ export default function Studio() {
                 />
               ))}
             </div>
-
-            {isAdmin && (
-              <div className="mt-6 rounded-2xl border-2 border-dashed border-amber-300 bg-amber-50/60 p-4 dark:border-amber-700 dark:bg-amber-950/20">
-                <p className="mb-1 flex items-center gap-2 text-lg font-semibold">
-                  <Icon icon="ph:shield-check-duotone" className="text-2xl text-amber-600" />
-                  AI 모델
-                  <span className="rounded-full bg-amber-200 px-2 py-0.5 text-sm font-bold text-amber-900 dark:bg-amber-800 dark:text-amber-100">
-                    관리자만 보여요
-                  </span>
-                </p>
-                <p className="mb-3 text-base text-neutral-600 dark:text-neutral-400">
-                  다른 직원들은 항상 기본 모델로 만들어요.
-                </p>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  {IMAGE_MODELS.map((m) => (
-                    <ChoiceCard
-                      key={m.key}
-                      active={imageModel === m.key}
-                      icon="ph:cpu-duotone"
-                      title={m.label}
-                      desc={m.desc}
-                      onClick={() => setImageModel(m.key)}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
 
             <EstimateBar estimate={estimate} />
           </Section>
@@ -706,9 +720,6 @@ export default function Studio() {
                 value={custom ? `직접 (${effW}×${effH})` : `${size!.label} (${size!.w}×${size!.h})`}
               />
               <SummaryRow label="품질" value={QUALITIES.find((q) => q.key === quality)?.label ?? quality} />
-              {isAdmin && (
-                <SummaryRow label="AI 모델" value={IMAGE_MODELS.find((m) => m.key === imageModel)?.label ?? imageModel} />
-              )}
               <SummaryRow label="설명" value={description} />
               {color && <SummaryRow label="전체 색감" value={color.name} />}
               {bizName.trim() && <SummaryRow label="업체명" value={bizName} />}

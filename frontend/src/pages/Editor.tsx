@@ -27,7 +27,6 @@ interface EditorState {
   templateName?: string;
   folderId?: string;
   quality?: string;
-  model?: string; // 관리자가 고른 이미지 모델(AI로 수정에도 그대로 사용)
   kind?: "banner" | "flyer";
   pages?: TemplatePage[];
 }
@@ -691,7 +690,6 @@ export default function Editor() {
             width: targetW,
             height: targetH,
             quality: st.quality || "medium",
-            model: st.model,
             user_input: inputItems([
               ["AI 수정 요청", request],
               ["크기 변경", sizeChanged ? `${targetW}x${targetH}` : ""],
